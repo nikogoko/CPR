@@ -4,43 +4,118 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Price Tracker</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🍕</text></svg>">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Pacifico&display=swap" rel="stylesheet">
 <style>
-  body { font-family: system-ui, "Noto Sans Georgian", sans-serif; max-width: 1000px; margin: 0 auto; padding: 16px; background: #fafafa; color: #222; }
-  h1 { font-size: 1.4rem; margin-top: 0; }
-  .card { background: #fff; border: 1px solid #ddd; border-radius: 8px; padding: 16px; margin-bottom: 16px; }
-  button { padding: 10px 16px; border: 0; border-radius: 6px; background: #2563eb; color: #fff; font-size: 1rem; cursor: pointer; }
-  button:disabled { background: #9ca3af; cursor: default; }
-  button.secondary { background: #6b7280; }
-  .topbar { display: flex; flex-wrap: wrap; gap: 12px; justify-content: space-between; align-items: center; margin-bottom: 16px; }
-  nav { display: flex; flex-wrap: wrap; gap: 6px; }
-  button.danger { background: #b91c1c; }
-  nav button { background: #e5e7eb; color: #222; }
-  nav button.active { background: #2563eb; color: #fff; }
-  .row { display: flex; flex-wrap: wrap; gap: 12px; align-items: end; margin-bottom: 12px; }
-  .row label { display: flex; flex-direction: column; font-size: .85rem; gap: 4px; }
-  select, input[type=text], input[type=date], input[type=password] { padding: 8px; border: 1px solid #ccc; border-radius: 4px; font-size: 1rem; }
+  :root {
+    --sauce: #b8321f;  --sauce-dark: #8f2214;   /* tomato sauce */
+    --crust: #6b4a32;  --crust-dark: #523823;   /* crust brown */
+    --cheese: #f3c24a;                          /* melted cheese */
+    --cream: #fbf4e4;  --paper: #fffdf7;
+    --ink: #3a2418;    --muted: #7a6552;  --line: #e4d4b4;
+    --up: #1f7a2e;     --down: #c62828;  --offer: #8a5200;
+  }
+  * { box-sizing: border-box; }
+  [hidden] { display: none !important; }   /* so display rules below never override the hidden attribute */
+  body { margin: 0; background: var(--cream); color: var(--ink); line-height: 1.45;
+         font-family: system-ui, -apple-system, "Segoe UI", "Noto Sans Georgian", sans-serif; }
+
+  /* red-and-white checked tablecloth */
+  .band { height: 24px; background-color: #fff; border-bottom: 3px solid var(--sauce);
+          background-image: linear-gradient(90deg, rgba(184,50,31,.5) 50%, transparent 50%), linear-gradient(rgba(184,50,31,.5) 50%, transparent 50%);
+          background-size: 24px 24px; }
+  .wrap { max-width: 1000px; margin: 0 auto; padding: 16px; }
+  header.brand { text-align: center; padding: 6px 0 20px; }
+  header.brand h1 { font-family: "Pacifico", Georgia, serif; font-weight: 400; font-size: 2.5rem; margin: 0; color: var(--sauce); }
+  header.brand p { margin: 2px 0 0; color: var(--muted); font-size: .95rem; letter-spacing: .04em; }
+
+  /* menu-card panels */
+  .card { background: var(--paper); border: 1px solid var(--line); border-radius: 16px; padding: 20px; margin-bottom: 18px;
+          box-shadow: 0 2px 0 var(--line), 0 10px 22px rgba(90,50,20,.08); }
+  #restView .card, #results.card { outline: 1px dashed var(--line); outline-offset: -9px; }
+
+  button { font: inherit; font-weight: 600; padding: 10px 20px; border: 0; border-radius: 999px; background: var(--sauce); color: #fff; cursor: pointer; transition: background .15s, transform .05s; }
+  button:hover:not(:disabled) { background: var(--sauce-dark); }
+  button:active:not(:disabled) { transform: translateY(1px); }
+  button:disabled { background: #cdbca4; cursor: default; }
+  button.secondary { background: var(--crust); }
+  button.secondary:hover:not(:disabled) { background: var(--crust-dark); }
+  button.danger { background: #7f1d1d; }
+  button.danger:hover:not(:disabled) { background: #5f1414; }
+  button:focus-visible, input:focus-visible, select:focus-visible { outline: 3px solid var(--cheese); outline-offset: 2px; }
+
+  .topbar { display: flex; flex-wrap: wrap; gap: 12px; justify-content: space-between; align-items: center; margin-bottom: 18px; }
+  nav { display: flex; flex-wrap: wrap; gap: 8px; }
+  nav button { background: var(--paper); color: var(--ink); border: 1.5px solid var(--line); padding: 8px 18px; }
+  nav button:not(.active):hover:not(:disabled) { background: #f6e6c4; }
+  nav button.active { background: var(--sauce); color: #fff; border-color: var(--sauce); }
+
+  .row { display: flex; flex-wrap: wrap; gap: 14px; align-items: end; margin-bottom: 14px; }
+  .row label { display: flex; flex-direction: column; font-size: .82rem; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; color: var(--muted); gap: 5px; }
+  select, input[type=text], input[type=date], input[type=password], td input {
+    font: inherit; color: var(--ink); background: #fff; border: 1.5px solid var(--line); border-radius: 10px; padding: 9px 11px; text-transform: none; letter-spacing: 0; font-weight: 400; }
+  input[type=file] { font: inherit; max-width: 100%; }
+  input[type=file]::file-selector-button { font: inherit; font-weight: 600; border: 0; border-radius: 999px; padding: 9px 18px; margin-right: 12px; background: var(--cheese); color: var(--ink); cursor: pointer; }
+  input[type=file]::file-selector-button:hover { background: #e9b432; }
+
   table { width: 100%; border-collapse: collapse; }
   th, td { text-align: left; padding: 4px; vertical-align: top; }
-  th { font-size: .85rem; color: #555; }
-  td input { width: 100%; box-sizing: border-box; padding: 6px; border: 1px solid #ccc; border-radius: 4px; }
-  td input.bad { border-color: #b91c1c; background: #fef2f2; }
-  #status { margin-top: 8px; min-height: 1.2em; }
-  .err { color: #b91c1c; } .ok { color: #15803d; }
+  th { font-size: .75rem; text-transform: uppercase; letter-spacing: .07em; color: var(--muted); font-weight: 700; padding: 6px 4px; }
+  td input { width: 100%; padding: 7px 9px; }
+  td input.bad { border-color: var(--down); background: #fdecea; }
+  #results table { min-width: 860px; }
+  #results td:nth-child(2) { min-width: 170px; } #results td:nth-child(6) { min-width: 190px; }
+  tr.group td { background: #f8e7bd; font-weight: 700; padding: 10px 12px; border-left: 5px solid var(--sauce); border-radius: 6px; }
+
+  #status { margin-top: 10px; min-height: 1.2em; }
+  .err { color: #b3261e; font-weight: 600; } .ok { color: #2e7d32; font-weight: 600; }
   .scroll { overflow-x: auto; }
-  tr.group td { background: #eef2ff; font-weight: 600; padding: 8px 6px; }
-  .grid td, .grid th { border-bottom: 1px solid #eee; padding: 8px 6px; }
-  .grid s { color: #888; margin-left: 6px; }
-  .grid .note { font-size: .8rem; color: #0f766e; }
-  .muted { color: #666; }
-  .chg { margin-left: 6px; font-size: .85rem; font-weight: 600; white-space: nowrap; }
-  .chg.up { color: #15803d; } .chg.down { color: #b91c1c; }
-  .legend { font-size: .85rem; color: #555; margin: 8px 0 0; }
+  .muted { color: var(--muted); }
+
+  /* restaurant price grid */
+  #restTitle { font-family: Georgia, "Times New Roman", serif; font-size: 1.8rem; color: var(--sauce); margin: 0 12px 0 0 !important; }
+  .grid { border-collapse: separate; border-spacing: 0; }
+  .grid thead th { background: var(--sauce); color: #fff; font-size: .9rem; text-transform: none; letter-spacing: 0; padding: 11px 14px; }
+  .grid thead th:first-child { border-top-left-radius: 10px; } .grid thead th:last-child { border-top-right-radius: 10px; }
+  .grid td { padding: 13px 14px; border-bottom: 1px solid var(--line); }
+  .grid tbody tr:nth-child(even) td { background: #fdf7e8; }
+  .grid tbody tr:hover td { background: #fbeccb; }
+  .grid td strong { font-size: 1.08rem; }
+  .grid s { color: var(--muted); margin-left: 8px; font-size: .9rem; }
+  .grid .note { font-size: .8rem; font-weight: 600; color: var(--offer); margin-top: 2px; }
+  .chg { margin-left: 8px; font-size: .85rem; font-weight: 700; white-space: nowrap; }
+  .chg.up { color: var(--up); } .chg.down { color: var(--down); }
+  .legend { font-size: .85rem; color: var(--muted); margin: 12px 0 0; }
+
+  /* login */
+  #login { max-width: 380px; margin: 28px auto; text-align: center; }
+  #login p { margin: 0 0 16px; color: var(--muted); }
+  #login label { display: flex; flex-direction: column; gap: 6px; text-align: left; font-weight: 700; margin-bottom: 14px; }
+  #login input, #login button { width: 100%; }
+  #loginMsg { margin-top: 12px; }
+
+  @media (max-width: 600px) {
+    .wrap { padding: 12px; } .card { padding: 14px; } header.brand h1 { font-size: 2rem; }
+    .topbar { justify-content: center; } #restTitle { font-size: 1.5rem; }
+    .grid thead th, .grid td { padding: 9px 6px; }
+    .grid td:first-child { min-width: 78px; max-width: 105px; }
+    .grid td strong { font-size: .95rem; } .grid .note { font-size: .74rem; }
+    .chg { white-space: normal; margin-left: 3px; font-size: .78rem; } .grid s { margin-left: 3px; font-size: .82rem; }
+  }
 </style>
 </head>
 <body>
-<h1>Price Tracker</h1>
+<div class="band"></div>
+<div class="wrap">
+<header class="brand">
+  <h1>🍕 Price Tracker</h1>
+  <p>Fresh menu prices, served daily</p>
+</header>
 
 <div class="card" id="login">
+  <p>Enter the password to come on in.</p>
   <label>Password <input type="password" id="pw"></label>
   <button id="loginBtn">Enter</button>
   <div id="loginMsg" class="err"></div>
@@ -101,6 +176,8 @@
       <p class="legend"><span class="chg up">▲</span> price went up, <span class="chg down">▼</span> price went down, compared with the last earlier date this pizza and size was recorded.</p>
     </div>
   </section>
+</div>
+
 </div>
 
 <script>
