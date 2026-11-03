@@ -3,6 +3,7 @@
   "version": "1.0.0",
   "private": true,
   "dependencies": {
+    "@anthropic-ai/sdk": "^1.4.0",
     "@netlify/blobs": "^8.1.0",
     "exceljs": "^4.4.0"
   }
