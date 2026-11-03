@@ -1,7 +1,8 @@
-// Builds an Excel file: "All data" (full history) + one grid sheet per restaurant (newest date).
+// Builds an Excel file: "All data" (full history) + one sheet per restaurant with a Glovo part and a Wolt part (newest date of each).
 const ExcelJS = require("exceljs");
 const { denied } = require("../../lib/auth");
 const { openStore, readAllHistory } = require("../../lib/store");
+const { PLATFORMS } = require("../../lib/platforms");
 
 const MONEY = '0.00"₾"';
 
@@ -29,6 +30,8 @@ function styleHeader(row) {
 }
 const CENTER = { horizontal: "center" };
 const PRINT = { orientation: "landscape", fitToPage: true, fitToWidth: 1, fitToHeight: 0 };   // prints one page wide
+const platformOf = (r) => r.platform || "";
+const platformLabel = (p) => p || "No platform";
 const asNum = (v) => (typeof v === "number" && Number.isFinite(v) ? v : null);
 
 exports.handler = async (event) => {
@@ -49,6 +52,7 @@ exports.handler = async (event) => {
     const all = wb.addWorksheet("All data", { views: [{ state: "frozen", ySplit: 1 }] });
     all.columns = [
       { header: "Restaurant", key: "restaurant", width: 20 },
+      { header: "Platform", key: "platform", width: 12 },
       { header: "Date", key: "date", width: 20 },
       { header: "Pizza", key: "item", width: 42 },
       { header: "Size", key: "size", width: 10 },
@@ -59,36 +63,45 @@ exports.handler = async (event) => {
     for (const rec of records) {
       const sorted = [...rec.rows].sort((a, b) => b.date.localeCompare(a.date));
       for (const r of sorted)
-        all.addRow({ restaurant: rec.name, date: new Date(r.date + "T00:00:00Z"), item: r.item, size: r.size, sale: asNum(r.sale_price), reg: asNum(r.regular_price), notes: r.notes });
+        all.addRow({ restaurant: rec.name, platform: platformLabel(platformOf(r)), date: new Date(r.date + "T00:00:00Z"), item: r.item, size: r.size, sale: asNum(r.sale_price), reg: asNum(r.regular_price), notes: r.notes });
     }
     all.getColumn("date").numFmt = "d mmmm yyyy"; // real dates, so Excel can still sort and filter them
     all.getColumn("sale").numFmt = MONEY;
     all.getColumn("reg").numFmt = MONEY;
     styleHeader(all.getRow(1));
     all.pageSetup = PRINT;
-    all.autoFilter = "A1:G1";
+    all.autoFilter = "A1:H1";
 
-    // One sheet per restaurant: pizzas as rows, sizes as columns, for that restaurant's newest date.
+    // One sheet per restaurant, in two parts: the Glovo grid on top, the Wolt grid below.
+    // Each part is pizzas as rows and sizes as columns, for that platform's newest date.
+    const order = (p) => { const i = PLATFORMS.indexOf(p); return i === -1 ? PLATFORMS.length : i; };
     for (const rec of records) {
-      const newest = rec.rows.map((r) => r.date).sort().pop();
-      const rows = rec.rows.filter((r) => r.date === newest);
-      const sizes = [...new Set(rows.map((r) => r.size))].sort((a, b) => ((parseFloat(a) || 0) - (parseFloat(b) || 0)) || a.localeCompare(b));
-      const pizzas = [...new Set(rows.map((r) => r.item))];
-      const cell = new Map(rows.map((r) => [r.item + "\u0000" + r.size, r]));
-
+      const platforms = [...new Set(rec.rows.map(platformOf))].sort((x, y) => order(x) - order(y));
       const ws = wb.addWorksheet(sheetName(rec.name, used));
-      ws.addRow([`${rec.name} · prices on ${niceDate(newest)}`]).font = { bold: true, size: 13 };
-      ws.addRow([]);
-      const head = ws.addRow(["Pizza", ...sizes]);
-      styleHeader(head);
-      for (let c = 2; c <= sizes.length + 1; c++) head.getCell(c).alignment = { vertical: "middle", ...CENTER };
-      for (const p of pizzas) {
-        const row = ws.addRow([p, ...sizes.map((s) => asNum(cell.get(p + "\u0000" + s)?.sale_price))]);
-        for (let c = 2; c <= sizes.length + 1; c++) { row.getCell(c).numFmt = MONEY; row.getCell(c).alignment = CENTER; }
+      ws.addRow([rec.name]).font = { bold: true, size: 16, color: { argb: "FFB8321F" } };
+      let widest = 1;
+
+      for (const plat of platforms) {
+        const mine = rec.rows.filter((r) => platformOf(r) === plat);
+        const newest = mine.map((r) => r.date).sort().pop();
+        const rows = mine.filter((r) => r.date === newest);
+        const sizes = [...new Set(rows.map((r) => r.size))].sort((a, b) => ((parseFloat(a) || 0) - (parseFloat(b) || 0)) || a.localeCompare(b));
+        const pizzas = [...new Set(rows.map((r) => r.item))];
+        const cell = new Map(rows.map((r) => [r.item + "\u0000" + r.size, r]));
+        widest = Math.max(widest, sizes.length + 1);
+
+        ws.addRow([]);
+        ws.addRow([`${platformLabel(plat)} · prices on ${niceDate(newest)}`]).font = { bold: true, size: 13 };
+        const head = ws.addRow(["Pizza", ...sizes]);
+        styleHeader(head);
+        for (let c = 2; c <= sizes.length + 1; c++) head.getCell(c).alignment = { vertical: "middle", ...CENTER };
+        for (const p of pizzas) {
+          const row = ws.addRow([p, ...sizes.map((s) => asNum(cell.get(p + "\u0000" + s)?.sale_price))]);
+          for (let c = 2; c <= sizes.length + 1; c++) { row.getCell(c).numFmt = MONEY; row.getCell(c).alignment = CENTER; }
+        }
       }
       ws.getColumn(1).width = 42;
-      for (let c = 2; c <= sizes.length + 1; c++) ws.getColumn(c).width = 12;
-      ws.views = [{ state: "frozen", ySplit: 3 }];
+      for (let c = 2; c <= widest; c++) ws.getColumn(c).width = 12;
       ws.pageSetup = PRINT;
     }
 

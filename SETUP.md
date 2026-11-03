@@ -20,13 +20,15 @@ Push this project to your repository (node_modules is ignored automatically).
 
 ## Using it
 - Browser zoomed out until the whole menu category shows, take a screenshot (include the size heading, e.g. "33 cm").
-- Add tab -> pick the restaurant (or add a new one) -> pick the date -> choose screenshots -> Read.
+- Add tab -> pick the restaurant (or add a new one) -> pick the platform (Glovo or Wolt) -> pick the date -> choose screenshots -> Read.
+  Glovo and Wolt prices are kept apart, even for the same pizza on the same day.
 - Check the rows (red cells must be filled) -> Save prices.
-- Each restaurant gets its own tab. It opens on the newest date; the dropdown shows older dates.
-  Arrows show price changes since the last earlier date that pizza and size was recorded.
-- Download Excel gives a .xlsx with an "All data" sheet (full history, with filters) and one grid sheet per restaurant (newest date).
-- Sending the same restaurant + date + size + pizza again replaces the earlier entry (so you can correct a day).
-- "Delete this date" removes a restaurant's whole day if a batch was wrong.
+- Each restaurant gets its own tab with a Glovo | Wolt switch inside it. It opens on the platform with the freshest prices and its newest date; the dropdown shows older dates.
+  Arrows show price changes since the last earlier date that pizza and size was recorded on the same platform.
+- Download Excel gives a .xlsx with an "All data" sheet (full history, with filters and a Platform column) and one sheet per restaurant with two parts: Glovo on top, Wolt below (newest date of each).
+- Sending the same restaurant + platform + date + size + pizza again replaces the earlier entry (so you can correct a day).
+- "Delete this date" removes one restaurant + platform + day if a batch was wrong.
+- To add another delivery app later, add its name to lib/platforms.js and to PLATFORMS in index.html.
 - Rows you have read but not saved are kept on the server, so every device that logs in sees them.
 
 ## Where the data lives

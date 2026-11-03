@@ -65,8 +65,9 @@
   th { font-size: .75rem; text-transform: uppercase; letter-spacing: .07em; color: var(--muted); font-weight: 700; padding: 6px 4px; }
   td input { width: 100%; padding: 7px 9px; }
   td input.bad { border-color: var(--down); background: #fdecea; }
-  #results table { min-width: 860px; }
-  #results td:nth-child(2) { min-width: 170px; } #results td:nth-child(6) { min-width: 190px; }
+  #results table { min-width: 900px; }
+  #results td:nth-child(2) { min-width: 92px; } #results td:nth-child(3) { min-width: 150px; } #results td:nth-child(7) { min-width: 160px; }
+  td select { width: 100%; padding: 7px 9px; }
   tr.group td { background: #f8e7bd; font-weight: 700; padding: 10px 12px; border-left: 5px solid var(--sauce); border-radius: 6px; }
 
   #status { margin-top: 10px; min-height: 1.2em; }
@@ -88,6 +89,13 @@
   .chg { margin-left: 8px; font-size: .85rem; font-weight: 700; white-space: nowrap; }
   .chg.up { color: var(--up); } .chg.down { color: var(--down); }
   .legend { font-size: .85rem; color: var(--muted); margin: 12px 0 0; }
+
+  /* Glovo / Wolt switch inside a restaurant */
+  .seg { display: inline-flex; gap: 4px; padding: 4px; background: #f1e4c8; border-radius: 999px; }
+  .seg button { background: transparent; color: var(--ink); padding: 7px 20px; }
+  .seg button:not(.active):hover:not(:disabled) { background: #f6e6c4; }
+  .seg button.active { background: var(--crust); color: #fff; }
+  .seg button.active:hover:not(:disabled) { background: var(--crust-dark); }
 
   /* login */
   #login { max-width: 380px; margin: 28px auto; text-align: center; }
@@ -137,6 +145,9 @@
         <label id="newRestWrap" hidden>New restaurant name
           <input type="text" id="newRest">
         </label>
+        <label>Platform
+          <select id="platform"></select>
+        </label>
         <label>Date of these prices
           <input type="date" id="date">
         </label>
@@ -151,7 +162,7 @@
     <div class="card" id="results" hidden>
       <div class="scroll">
         <table>
-          <thead><tr><th>Restaurant</th><th>Pizza</th><th>Size</th><th>Sale price</th><th>Regular price</th><th>Offer</th><th></th></tr></thead>
+          <thead><tr><th>Restaurant</th><th>Platform</th><th>Pizza</th><th>Size</th><th>Sale price</th><th>Regular price</th><th>Offer</th><th></th></tr></thead>
           <tbody id="rows"></tbody>
         </table>
       </div>
@@ -167,13 +178,17 @@
     <div class="card">
       <div class="row">
         <h2 id="restTitle" style="margin:0"></h2>
+        <div class="seg" id="platTabs"></div>
+      </div>
+      <div class="row" id="dateRow">
         <label>Date
           <select id="dateSel"></select>
         </label>
         <button class="danger" id="delDateBtn">Delete this date</button>
       </div>
-      <div class="scroll"><table class="grid" id="grid"></table></div>
-      <p class="legend"><span class="chg up">▲</span> price went up, <span class="chg down">▼</span> price went down, compared with the last earlier date this pizza and size was recorded.</p>
+      <p id="platEmpty" class="muted" hidden></p>
+      <div class="scroll" id="gridWrap"><table class="grid" id="grid"></table></div>
+      <p class="legend" id="legend"><span class="chg up">▲</span> price went up, <span class="chg down">▼</span> price went down, compared with the last earlier date this pizza and size was recorded.</p>
     </div>
   </section>
 </div>
@@ -182,13 +197,16 @@
 
 <script>
 const $ = (id) => document.getElementById(id);
-const FIELDS = ["restaurant", "item", "size", "sale_price", "regular_price", "notes"];
+const FIELDS = ["restaurant", "platform", "item", "size", "sale_price", "regular_price", "notes"];
+const PLATFORMS = ["Glovo", "Wolt"];   // keep in sync with lib/platforms.js
+const platformLabel = (p) => p || "No platform";   // older entries saved before platforms existed
 const NEW = "__new";
 let password = sessionStorage.getItem("pw") || "";
 let data = [];          // rows read but not yet sent (shared across devices)
 let history = [];       // saved price history
 let view = "add";       // "add" or a restaurant name
-let chosenDate = {};    // restaurant -> date being shown
+let chosenDate = {};    // restaurant|platform -> date being shown
+let chosenPlatform = {}; // restaurant -> Glovo / Wolt tab being shown
 let showBad = false;
 let saveTimer = null;
 let pickedNew = false;   // true only when the user deliberately chose "New restaurant"
@@ -253,6 +271,7 @@ function shrink(file, max = 1800) {
 function showApp() {
   $("login").hidden = true; $("app").hidden = false;
   $("date").value = today();
+  const ps = $("platform"); if (!ps.options.length) PLATFORMS.forEach((p) => { const o = document.createElement("option"); o.value = o.textContent = p; ps.appendChild(o); });
   renderTabs(); fillRestaurantSelect();
   loadPending(); loadHistory();
 }
@@ -271,7 +290,7 @@ function renderTabs() {
   const add = (label, v) => {
     const b = document.createElement("button");
     b.textContent = label; b.className = view === v ? "active" : "";
-    b.onclick = () => { view = v; delete chosenDate[v]; renderTabs(); showView(); };   // opening a tab always starts on the newest date
+    b.onclick = () => { view = v; delete chosenPlatform[v]; Object.keys(chosenDate).forEach((k) => { if (k.startsWith(v + "|")) delete chosenDate[k]; }); renderTabs(); showView(); };   // opening a tab always starts on the newest date
     nav.appendChild(b);
   };
   add("➕ Add", "add");
@@ -307,11 +326,36 @@ async function loadHistory() {
 
 function renderRestaurant() {
   const name = view;
-  const mine = history.filter((r) => r.restaurant === name);
-  const dates = [...new Set(mine.map((r) => r.date))].sort().reverse();   // newest first
-  const d = dates.includes(chosenDate[name]) ? chosenDate[name] : dates[0];
-  chosenDate[name] = d;
+  const everything = history.filter((r) => r.restaurant === name);
   $("restTitle").textContent = name;
+
+  // Glovo and Wolt are always offered; any other value (older entries) only if it exists.
+  const extra = [...new Set(everything.map((r) => r.platform || ""))].filter((p) => !PLATFORMS.includes(p));
+  const platforms = [...PLATFORMS, ...extra];
+  const newestOf = (p) => everything.filter((r) => (r.platform || "") === p).map((r) => r.date).sort().pop() || "";
+  if (!platforms.includes(chosenPlatform[name]))   // open on the platform with the freshest prices
+    chosenPlatform[name] = [...platforms].sort((a, b) => newestOf(b).localeCompare(newestOf(a)) || platforms.indexOf(a) - platforms.indexOf(b))[0];
+  const plat = chosenPlatform[name];
+
+  const seg = $("platTabs"); seg.innerHTML = "";
+  platforms.forEach((p) => {
+    const b = document.createElement("button");
+    b.textContent = platformLabel(p); b.className = p === plat ? "active" : "";
+    b.onclick = () => { chosenPlatform[name] = p; renderRestaurant(); };
+    seg.appendChild(b);
+  });
+
+  const mine = everything.filter((r) => (r.platform || "") === plat);
+  const dates = [...new Set(mine.map((r) => r.date))].sort().reverse();   // newest first
+  const empty = !dates.length;
+  $("dateRow").hidden = $("gridWrap").hidden = $("legend").hidden = empty;
+  $("platEmpty").hidden = !empty;
+  $("platEmpty").textContent = `No ${platformLabel(plat)} prices saved yet for ${name}.`;
+  if (empty) return;
+
+  const dKey = name + "|" + plat;
+  const d = dates.includes(chosenDate[dKey]) ? chosenDate[dKey] : dates[0];
+  chosenDate[dKey] = d;
 
   const sel = $("dateSel"); sel.innerHTML = "";
   dates.forEach((x, i) => { const o = document.createElement("option"); o.value = x; o.textContent = niceDate(x) + (i === 0 ? " (newest)" : ""); sel.appendChild(o); });
@@ -322,7 +366,7 @@ function renderRestaurant() {
   const pizzas = [...new Set(rows.map((r) => r.item))];
   const cell = new Map();
   rows.forEach((r) => cell.set(r.item + "\u0000" + r.size, r));   // if a day was sent twice, the last one wins
-  // Most recent earlier record of each pizza+size, for the ▲/▼ comparison.
+  // Most recent earlier record of each pizza+size ON THE SAME PLATFORM, for the ▲/▼ comparison.
   const before = new Map();
   mine.filter((r) => r.date < d).sort((a, b) => a.date.localeCompare(b.date))
     .forEach((r) => before.set(r.item + "\u0000" + r.size, r));
@@ -351,7 +395,7 @@ function renderRestaurant() {
     });
   });
 }
-$("dateSel").onchange = () => { chosenDate[view] = $("dateSel").value; renderRestaurant(); };
+$("dateSel").onchange = () => { chosenDate[view + "|" + chosenPlatform[view]] = $("dateSel").value; renderRestaurant(); };
 
 /* ---------- pending rows (shared via the server) ---------- */
 async function loadPending() {
@@ -374,6 +418,7 @@ document.addEventListener("visibilitychange", () => {
 });
 
 function invalid(f, row) {
+  if (f === "platform") return !PLATFORMS.includes(row.platform);
   if (f === "restaurant" || f === "item" || f === "size") return !String(row[f] ?? "").trim();
   if (f === "sale_price") return isNaN(numOf(row[f]));
   if (f === "regular_price") return String(row[f] ?? "").trim() !== "" && isNaN(numOf(row[f]));
@@ -385,24 +430,34 @@ function render() {
   const tbody = $("rows"); tbody.innerHTML = "";
   const groups = new Map();
   data.forEach((row, i) => {
-    const k = key(row.restaurant) + "|" + row.date;
+    const k = key(row.restaurant) + "|" + (row.platform || "") + "|" + row.date;
     if (!groups.has(k)) groups.set(k, []);
     groups.get(k).push(i);
   });
   [...groups.keys()].sort().forEach((k) => {
     const idxs = groups.get(k), first = data[idxs[0]];
     const h = document.createElement("tr"); h.className = "group";
-    h.innerHTML = `<td colspan="7"></td>`;
-    h.firstChild.textContent = `${first.restaurant.trim() || "(no restaurant)"} · ${niceDate(first.date)} · ${idxs.length} item${idxs.length > 1 ? "s" : ""}`;
+    h.innerHTML = `<td colspan="8"></td>`;
+    h.firstChild.textContent = `${first.restaurant.trim() || "(no restaurant)"} · ${first.platform || "(no platform)"} · ${niceDate(first.date)} · ${idxs.length} item${idxs.length > 1 ? "s" : ""}`;
     tbody.appendChild(h);
     idxs.forEach((i) => {
       const tr = document.createElement("tr");
       FIELDS.forEach((f) => {
-        const td = document.createElement("td"), inp = document.createElement("input");
-        inp.value = data[i][f] ?? ""; inp.dataset.f = f;
+        const td = document.createElement("td");
+        let inp;
+        if (f === "platform") {   // Glovo / Wolt picker instead of free text
+          inp = document.createElement("select");
+          PLATFORMS.forEach((p) => { const o = document.createElement("option"); o.value = o.textContent = p; inp.appendChild(o); });
+          inp.value = data[i][f] || "";   // an unknown/empty value leaves it blank and gets flagged on save
+          inp.onchange = () => { data[i][f] = inp.value; persist(); render(); };   // regroup under the right platform
+        } else {
+          inp = document.createElement("input");
+          inp.value = data[i][f] ?? "";
+          inp.oninput = () => { data[i][f] = inp.value; inp.classList.remove("bad"); persist(); };
+          if (f === "restaurant") inp.onchange = () => { render(); fillRestaurantSelect(); };
+        }
+        inp.dataset.f = f;
         if (showBad && invalid(f, data[i])) inp.className = "bad";
-        inp.oninput = () => { data[i][f] = inp.value; inp.classList.remove("bad"); persist(); };
-        if (f === "restaurant") inp.onchange = () => { render(); fillRestaurantSelect(); };
         td.appendChild(inp); tr.appendChild(td);
       });
       const td = document.createElement("td"), x = document.createElement("button");
@@ -416,11 +471,11 @@ function render() {
 }
 
 const isDup = (a) => data.some((r) =>
-  key(r.restaurant) === key(a.restaurant) && r.date === a.date && key(r.size) === key(a.size) &&
+  key(r.restaurant) === key(a.restaurant) && r.platform === a.platform && r.date === a.date && key(r.size) === key(a.size) &&
   key(r.item) === key(a.item) && numOf(r.sale_price) === numOf(a.sale_price));
 
 $("readBtn").onclick = async () => {
-  const restaurant = chosenRestaurant(), date = $("date").value, files = [...$("files").files];
+  const restaurant = chosenRestaurant(), platform = $("platform").value, date = $("date").value, files = [...$("files").files];
   if (!restaurant) return setStatus("Choose or type the restaurant first.", "err");
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return setStatus("Pick the date of these prices.", "err");
   if (!files.length) return setStatus("Choose at least one screenshot.", "err");
@@ -432,7 +487,7 @@ $("readBtn").onclick = async () => {
       const out = await api("extract", { image: await shrink(files[i]), mediaType: "image/jpeg" });
       unreadable += out.unreadable || 0;
       for (const it of out.items) {
-        const row = { restaurant, date, item: it.item || "", size: it.size || "", sale_price: it.sale_price || "", regular_price: it.regular_price || "", notes: it.notes || "" };
+        const row = { restaurant, platform, date, item: it.item || "", size: it.size || "", sale_price: it.sale_price || "", regular_price: it.regular_price || "", notes: it.notes || "" };
         if (isDup(row)) dups++; else { data.push(row); added++; }
       }
     }
@@ -452,13 +507,13 @@ $("saveBtn").onclick = async () => {
   if (!data.length) return setStatus("Nothing to send.", "err");
   showBad = true; render();
   if (data.some((r) => FIELDS.some((f) => invalid(f, r))))
-    return setStatus("Fix the red cells (restaurant, pizza, size and sale price are required).", "err");
+    return setStatus("Fix the red cells (restaurant, platform, pizza, size and sale price are required).", "err");
   $("saveBtn").disabled = true;
   try {
     clearTimeout(saveTimer); saveTimer = null;
     const { saved, replaced } = await api("save", { rows: data });
     data = []; showBad = false; render();
-    setStatus(`Saved ${saved} price(s).` + (replaced ? ` ${replaced} replaced an earlier entry for the same restaurant, date, size and pizza.` : ""), "ok");
+    setStatus(`Saved ${saved} price(s).` + (replaced ? ` ${replaced} replaced an earlier entry for the same restaurant, platform, date, size and pizza.` : ""), "ok");
     await loadHistory();
   } catch (e) { setStatus(e.message, "err"); }
   $("saveBtn").disabled = false;
@@ -467,12 +522,14 @@ $("saveBtn").onclick = async () => {
 $("clearBtn").onclick = () => { data = []; showBad = false; render(); persist(); setStatus(""); };
 
 $("delDateBtn").onclick = async () => {
-  const name = view, d = chosenDate[name];
-  if (!d || !confirm(`Delete all ${name} prices saved for ${niceDate(d)}? This cannot be undone.`)) return;
+  const name = view, plat = chosenPlatform[name], dKey = name + "|" + plat, d = chosenDate[dKey];
+  if (d === undefined || !confirm(`Delete all ${name} (${platformLabel(plat)}) prices saved for ${niceDate(d)}? This cannot be undone.`)) return;
   try {
-    await api("history", { action: "deleteDate", restaurant: name, date: d });
-    delete chosenDate[name];
+    await api("history", { action: "deleteDate", restaurant: name, platform: plat, date: d });
+    delete chosenDate[dKey];
     await loadHistory();
+    // If that platform has nothing left, jump to the one that still has prices instead of showing an empty page.
+    if (view === name && !history.some((r) => r.restaurant === name && (r.platform || "") === plat)) { delete chosenPlatform[name]; renderRestaurant(); }
   } catch (e) { alert(e.message); }
 };
 
