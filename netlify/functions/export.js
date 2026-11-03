@@ -18,6 +18,17 @@ function niceDate(iso) {
   const suffix = d % 100 >= 11 && d % 100 <= 13 ? "th" : ({ 1: "st", 2: "nd", 3: "rd" }[d % 10] || "th");
   return `${d}${suffix} ${MONTHS[m - 1]} ${y}`;
 }
+// Tomato-red header with white text, to match the site.
+function styleHeader(row) {
+  row.eachCell((c) => {
+    c.font = { bold: true, color: { argb: "FFFFFFFF" } };
+    c.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFB8321F" } };
+    c.alignment = { vertical: "middle" };
+  });
+  row.height = 22;
+}
+const CENTER = { horizontal: "center" };
+const PRINT = { orientation: "landscape", fitToPage: true, fitToWidth: 1, fitToHeight: 0 };   // prints one page wide
 const asNum = (v) => (typeof v === "number" && Number.isFinite(v) ? v : null);
 
 exports.handler = async (event) => {
@@ -38,7 +49,7 @@ exports.handler = async (event) => {
     const all = wb.addWorksheet("All data", { views: [{ state: "frozen", ySplit: 1 }] });
     all.columns = [
       { header: "Restaurant", key: "restaurant", width: 20 },
-      { header: "Date", key: "date", width: 12 },
+      { header: "Date", key: "date", width: 20 },
       { header: "Pizza", key: "item", width: 42 },
       { header: "Size", key: "size", width: 10 },
       { header: "Sale price", key: "sale", width: 12 },
@@ -53,7 +64,8 @@ exports.handler = async (event) => {
     all.getColumn("date").numFmt = "d mmmm yyyy"; // real dates, so Excel can still sort and filter them
     all.getColumn("sale").numFmt = MONEY;
     all.getColumn("reg").numFmt = MONEY;
-    all.getRow(1).font = { bold: true };
+    styleHeader(all.getRow(1));
+    all.pageSetup = PRINT;
     all.autoFilter = "A1:G1";
 
     // One sheet per restaurant: pizzas as rows, sizes as columns, for that restaurant's newest date.
@@ -67,14 +79,17 @@ exports.handler = async (event) => {
       const ws = wb.addWorksheet(sheetName(rec.name, used));
       ws.addRow([`${rec.name} · prices on ${niceDate(newest)}`]).font = { bold: true, size: 13 };
       ws.addRow([]);
-      ws.addRow(["Pizza", ...sizes]).font = { bold: true };
+      const head = ws.addRow(["Pizza", ...sizes]);
+      styleHeader(head);
+      for (let c = 2; c <= sizes.length + 1; c++) head.getCell(c).alignment = { vertical: "middle", ...CENTER };
       for (const p of pizzas) {
         const row = ws.addRow([p, ...sizes.map((s) => asNum(cell.get(p + "\u0000" + s)?.sale_price))]);
-        for (let c = 2; c <= sizes.length + 1; c++) row.getCell(c).numFmt = MONEY;
+        for (let c = 2; c <= sizes.length + 1; c++) { row.getCell(c).numFmt = MONEY; row.getCell(c).alignment = CENTER; }
       }
       ws.getColumn(1).width = 42;
       for (let c = 2; c <= sizes.length + 1; c++) ws.getColumn(c).width = 12;
       ws.views = [{ state: "frozen", ySplit: 3 }];
+      ws.pageSetup = PRINT;
     }
 
     const buffer = Buffer.from(await wb.xlsx.writeBuffer());
