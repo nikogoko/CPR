@@ -1,0 +1,408 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Price Tracker</title>
+<style>
+  body { font-family: system-ui, "Noto Sans Georgian", sans-serif; max-width: 1000px; margin: 0 auto; padding: 16px; background: #fafafa; color: #222; }
+  h1 { font-size: 1.4rem; margin-top: 0; }
+  .card { background: #fff; border: 1px solid #ddd; border-radius: 8px; padding: 16px; margin-bottom: 16px; }
+  button { padding: 10px 16px; border: 0; border-radius: 6px; background: #2563eb; color: #fff; font-size: 1rem; cursor: pointer; }
+  button:disabled { background: #9ca3af; cursor: default; }
+  button.secondary { background: #6b7280; }
+  .topbar { display: flex; flex-wrap: wrap; gap: 12px; justify-content: space-between; align-items: center; margin-bottom: 16px; }
+  nav { display: flex; flex-wrap: wrap; gap: 6px; }
+  button.danger { background: #b91c1c; }
+  nav button { background: #e5e7eb; color: #222; }
+  nav button.active { background: #2563eb; color: #fff; }
+  .row { display: flex; flex-wrap: wrap; gap: 12px; align-items: end; margin-bottom: 12px; }
+  .row label { display: flex; flex-direction: column; font-size: .85rem; gap: 4px; }
+  select, input[type=text], input[type=date], input[type=password] { padding: 8px; border: 1px solid #ccc; border-radius: 4px; font-size: 1rem; }
+  table { width: 100%; border-collapse: collapse; }
+  th, td { text-align: left; padding: 4px; vertical-align: top; }
+  th { font-size: .85rem; color: #555; }
+  td input { width: 100%; box-sizing: border-box; padding: 6px; border: 1px solid #ccc; border-radius: 4px; }
+  td input.bad { border-color: #b91c1c; background: #fef2f2; }
+  #status { margin-top: 8px; min-height: 1.2em; }
+  .err { color: #b91c1c; } .ok { color: #15803d; }
+  .scroll { overflow-x: auto; }
+  tr.group td { background: #eef2ff; font-weight: 600; padding: 8px 6px; }
+  .grid td, .grid th { border-bottom: 1px solid #eee; padding: 8px 6px; }
+  .grid s { color: #888; margin-left: 6px; }
+  .grid .note { font-size: .8rem; color: #0f766e; }
+  .muted { color: #666; }
+  .chg { margin-left: 6px; font-size: .85rem; font-weight: 600; white-space: nowrap; }
+  .chg.up { color: #15803d; } .chg.down { color: #b91c1c; }
+  .legend { font-size: .85rem; color: #555; margin: 8px 0 0; }
+</style>
+</head>
+<body>
+<h1>Price Tracker</h1>
+
+<div class="card" id="login">
+  <label>Password <input type="password" id="pw"></label>
+  <button id="loginBtn">Enter</button>
+</div>
+
+<div id="app" hidden>
+  <div class="topbar">
+    <nav id="tabs"></nav>
+    <div><button class="secondary" id="dlBtn">⬇ Download Excel</button> <span id="dlStatus" class="muted"></span></div>
+  </div>
+
+  <!-- ADD TAB -->
+  <section id="addView">
+    <div class="card">
+      <div class="row">
+        <label>Restaurant
+          <select id="rest"></select>
+        </label>
+        <label id="newRestWrap" hidden>New restaurant name
+          <input type="text" id="newRest">
+        </label>
+        <label>Date of these prices
+          <input type="date" id="date">
+        </label>
+      </div>
+      <div class="row">
+        <input type="file" id="files" accept="image/*" multiple>
+        <button id="readBtn">Read screenshots</button>
+      </div>
+      <div id="status"></div>
+    </div>
+
+    <div class="card" id="results" hidden>
+      <div class="scroll">
+        <table>
+          <thead><tr><th>Restaurant</th><th>Pizza</th><th>Size</th><th>Sale price</th><th>Regular price</th><th>Offer</th><th></th></tr></thead>
+          <tbody id="rows"></tbody>
+        </table>
+      </div>
+      <p>
+        <button id="saveBtn">Save prices</button>
+        <button class="secondary" id="clearBtn">Clear</button>
+      </p>
+    </div>
+  </section>
+
+  <!-- RESTAURANT TAB -->
+  <section id="restView" hidden>
+    <div class="card">
+      <div class="row">
+        <h2 id="restTitle" style="margin:0"></h2>
+        <label>Date
+          <select id="dateSel"></select>
+        </label>
+        <button class="danger" id="delDateBtn">Delete this date</button>
+      </div>
+      <div class="scroll"><table class="grid" id="grid"></table></div>
+      <p class="legend"><span class="chg up">▲</span> price went up, <span class="chg down">▼</span> price went down, compared with the last earlier date this pizza and size was recorded.</p>
+    </div>
+  </section>
+</div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const FIELDS = ["restaurant", "item", "size", "sale_price", "regular_price", "notes"];
+const NEW = "__new";
+let password = sessionStorage.getItem("pw") || "";
+let data = [];          // rows read but not yet sent (shared across devices)
+let history = [];       // saved price history
+let view = "add";       // "add" or a restaurant name
+let chosenDate = {};    // restaurant -> date being shown
+let showBad = false;
+let saveTimer = null;
+let pickedNew = false;   // true only when the user deliberately chose "New restaurant"
+
+const key = (s) => String(s ?? "").trim().toLowerCase();
+function today() {
+  const d = new Date(), p = (n) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+}
+function numOf(v) {
+  let s = String(v ?? "").replace(/[^\d.,]/g, "");
+  if (!s) return NaN;
+  if (s.includes(",") && s.includes(".")) s = s.replace(/,/g, "");
+  else s = s.replace(",", ".");
+  return parseFloat(s);
+}
+const money = (v) => (typeof v === "number" ? v.toFixed(2) : String(v)) + "₾";   // display only; stored values are plain numbers
+const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+// "2026-11-03" -> "3rd November 2026" (values stay ISO underneath so sorting still works)
+function niceDate(iso) {
+  const [y, m, d] = String(iso).split("-").map(Number);
+  if (!y || !m || !d) return String(iso);
+  const suffix = d % 100 >= 11 && d % 100 <= 13 ? "th" : ({ 1: "st", 2: "nd", 3: "rd" }[d % 10] || "th");
+  return `${d}${suffix} ${MONTHS[m - 1]} ${y}`;
+}
+function setStatus(msg, cls) { $("status").textContent = msg; $("status").className = cls || ""; }
+
+async function api(name, body) {
+  const res = await fetch(`/.netlify/functions/${name}`, {
+    method: "POST",
+    headers: { "content-type": "application/json", "x-site-password": password },
+    body: JSON.stringify(body)
+  });
+  const out = await res.json().catch(() => ({}));
+  if (res.status === 401) { sessionStorage.removeItem("pw"); location.reload(); }
+  if (!res.ok) throw new Error(out.error || `Error ${res.status}`);
+  return out;
+}
+
+// Shrink screenshots so uploads stay under Netlify's 6MB request limit.
+function shrink(file, max = 1800) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => {
+      const scale = Math.min(1, max / Math.max(img.width, img.height));
+      const c = document.createElement("canvas");
+      c.width = img.width * scale; c.height = img.height * scale;
+      c.getContext("2d").drawImage(img, 0, 0, c.width, c.height);
+      resolve(c.toDataURL("image/jpeg", 0.85).split(",")[1]);
+    };
+    img.onerror = reject;
+    img.src = URL.createObjectURL(file);
+  });
+}
+
+/* ---------- start-up, tabs ---------- */
+function showApp() {
+  $("login").hidden = true; $("app").hidden = false;
+  $("date").value = today();
+  renderTabs(); fillRestaurantSelect();
+  loadPending(); loadHistory();
+}
+$("loginBtn").onclick = () => { password = $("pw").value; sessionStorage.setItem("pw", password); showApp(); };
+
+const restaurantsSaved = () => [...new Set(history.map((r) => r.restaurant))].sort((a, b) => a.localeCompare(b));
+
+function renderTabs() {
+  const nav = $("tabs"); nav.innerHTML = "";
+  const add = (label, v) => {
+    const b = document.createElement("button");
+    b.textContent = label; b.className = view === v ? "active" : "";
+    b.onclick = () => { view = v; delete chosenDate[v]; renderTabs(); showView(); };   // opening a tab always starts on the newest date
+    nav.appendChild(b);
+  };
+  add("➕ Add", "add");
+  restaurantsSaved().forEach((r) => add(r, r));
+}
+function showView() {
+  $("addView").hidden = view !== "add";
+  $("restView").hidden = view === "add";
+  if (view !== "add") renderRestaurant();
+}
+
+function fillRestaurantSelect() {
+  const sel = $("rest"), prev = sel.value;
+  const names = [...new Set([...restaurantsSaved(), ...data.map((r) => r.restaurant).filter(Boolean)])];
+  sel.innerHTML = "";
+  names.forEach((n) => { const o = document.createElement("option"); o.value = n; o.textContent = n; sel.appendChild(o); });
+  const o = document.createElement("option"); o.value = NEW; o.textContent = "➕ New restaurant…"; sel.appendChild(o);
+  // Keep the current choice, but don't stay on "New restaurant" just because the list was empty at start-up.
+  const keep = [...sel.options].some((x) => x.value === prev) && !(prev === NEW && !pickedNew && names.length);
+  sel.value = keep ? prev : sel.options[0].value;
+  $("newRestWrap").hidden = sel.value !== NEW;
+}
+$("rest").onchange = () => { pickedNew = $("rest").value === NEW; $("newRestWrap").hidden = !pickedNew; };
+const chosenRestaurant = () => ($("rest").value === NEW ? $("newRest").value.trim() : $("rest").value);
+
+/* ---------- saved history ---------- */
+async function loadHistory() {
+  try { history = (await api("history", { action: "read" })).rows; }
+  catch (e) { setStatus("Could not load saved prices: " + e.message, "err"); }
+  if (view !== "add" && !restaurantsSaved().includes(view)) view = "add";
+  renderTabs(); fillRestaurantSelect(); showView();
+}
+
+function renderRestaurant() {
+  const name = view;
+  const mine = history.filter((r) => r.restaurant === name);
+  const dates = [...new Set(mine.map((r) => r.date))].sort().reverse();   // newest first
+  const d = dates.includes(chosenDate[name]) ? chosenDate[name] : dates[0];
+  chosenDate[name] = d;
+  $("restTitle").textContent = name;
+
+  const sel = $("dateSel"); sel.innerHTML = "";
+  dates.forEach((x, i) => { const o = document.createElement("option"); o.value = x; o.textContent = niceDate(x) + (i === 0 ? " (newest)" : ""); sel.appendChild(o); });
+  sel.value = d;
+
+  const rows = mine.filter((r) => r.date === d);
+  const sizes = [...new Set(rows.map((r) => r.size))].sort((a, b) => ((parseFloat(a) || 0) - (parseFloat(b) || 0)) || a.localeCompare(b));
+  const pizzas = [...new Set(rows.map((r) => r.item))];
+  const cell = new Map();
+  rows.forEach((r) => cell.set(r.item + "\u0000" + r.size, r));   // if a day was sent twice, the last one wins
+  // Most recent earlier record of each pizza+size, for the ▲/▼ comparison.
+  const before = new Map();
+  mine.filter((r) => r.date < d).sort((a, b) => a.date.localeCompare(b.date))
+    .forEach((r) => before.set(r.item + "\u0000" + r.size, r));
+
+  const grid = $("grid"); grid.innerHTML = "";
+  const head = grid.createTHead().insertRow();
+  ["Pizza", ...sizes].forEach((h) => { const th = document.createElement("th"); th.textContent = h; head.appendChild(th); });
+  const body = grid.createTBody();
+  pizzas.forEach((p) => {
+    const tr = body.insertRow();
+    tr.insertCell().textContent = p;
+    sizes.forEach((s) => {
+      const td = tr.insertCell(), r = cell.get(p + "\u0000" + s);
+      if (!r) { td.textContent = "–"; td.className = "muted"; return; }
+      const b = document.createElement("strong"); b.textContent = money(r.sale_price); td.appendChild(b);
+      const old = before.get(p + "\u0000" + s), diff = old ? numOf(r.sale_price) - numOf(old.sale_price) : 0;
+      if (Math.abs(diff) >= 0.005) {
+        const c = document.createElement("span");
+        c.className = "chg " + (diff > 0 ? "up" : "down");
+        c.textContent = (diff > 0 ? "▲ " : "▼ ") + Math.abs(diff).toFixed(2) + "₾";
+        c.title = `was ${money(old.sale_price)} on ${niceDate(old.date)}`;
+        td.appendChild(c);
+      }
+      if (r.regular_price !== "" && r.regular_price != null) { const o = document.createElement("s"); o.textContent = money(r.regular_price); td.appendChild(o); }
+      if (r.notes) { const n = document.createElement("div"); n.className = "note"; n.textContent = r.notes; td.appendChild(n); }
+    });
+  });
+}
+$("dateSel").onchange = () => { chosenDate[view] = $("dateSel").value; renderRestaurant(); };
+
+/* ---------- pending rows (shared via the server) ---------- */
+async function loadPending() {
+  try {
+    data = (await api("pending", { action: "load" })).rows;
+    render(); fillRestaurantSelect();
+    if (data.length) setStatus(`${data.length} saved row(s) loaded.`, "ok");
+  } catch (e) { setStatus("Could not load saved rows: " + e.message, "err"); }
+}
+function persist() {
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(async () => {
+    saveTimer = null;
+    try { await api("pending", { action: "save", rows: data }); }
+    catch (e) { setStatus("Could not save rows: " + e.message, "err"); }
+  }, 600);
+}
+document.addEventListener("visibilitychange", () => {
+  if (!document.hidden && !$("app").hidden && !saveTimer) { loadPending(); loadHistory(); }
+});
+
+function invalid(f, row) {
+  if (f === "restaurant" || f === "item" || f === "size") return !String(row[f] ?? "").trim();
+  if (f === "sale_price") return isNaN(numOf(row[f]));
+  if (f === "regular_price") return String(row[f] ?? "").trim() !== "" && isNaN(numOf(row[f]));
+  return false;
+}
+
+// Table grouped by restaurant + date. Rows keep their index in `data`.
+function render() {
+  const tbody = $("rows"); tbody.innerHTML = "";
+  const groups = new Map();
+  data.forEach((row, i) => {
+    const k = key(row.restaurant) + "|" + row.date;
+    if (!groups.has(k)) groups.set(k, []);
+    groups.get(k).push(i);
+  });
+  [...groups.keys()].sort().forEach((k) => {
+    const idxs = groups.get(k), first = data[idxs[0]];
+    const h = document.createElement("tr"); h.className = "group";
+    h.innerHTML = `<td colspan="7"></td>`;
+    h.firstChild.textContent = `${first.restaurant.trim() || "(no restaurant)"} · ${niceDate(first.date)} · ${idxs.length} item${idxs.length > 1 ? "s" : ""}`;
+    tbody.appendChild(h);
+    idxs.forEach((i) => {
+      const tr = document.createElement("tr");
+      FIELDS.forEach((f) => {
+        const td = document.createElement("td"), inp = document.createElement("input");
+        inp.value = data[i][f] ?? ""; inp.dataset.f = f;
+        if (showBad && invalid(f, data[i])) inp.className = "bad";
+        inp.oninput = () => { data[i][f] = inp.value; inp.classList.remove("bad"); persist(); };
+        if (f === "restaurant") inp.onchange = () => { render(); fillRestaurantSelect(); };
+        td.appendChild(inp); tr.appendChild(td);
+      });
+      const td = document.createElement("td"), x = document.createElement("button");
+      x.textContent = "✕"; x.className = "secondary";
+      x.onclick = () => { data.splice(i, 1); render(); persist(); $("results").hidden = !data.length; };
+      td.appendChild(x); tr.appendChild(td);
+      tbody.appendChild(tr);
+    });
+  });
+  $("results").hidden = !data.length;
+}
+
+const isDup = (a) => data.some((r) =>
+  key(r.restaurant) === key(a.restaurant) && r.date === a.date && key(r.size) === key(a.size) &&
+  key(r.item) === key(a.item) && numOf(r.sale_price) === numOf(a.sale_price));
+
+$("readBtn").onclick = async () => {
+  const restaurant = chosenRestaurant(), date = $("date").value, files = [...$("files").files];
+  if (!restaurant) return setStatus("Choose or type the restaurant first.", "err");
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return setStatus("Pick the date of these prices.", "err");
+  if (!files.length) return setStatus("Choose at least one screenshot.", "err");
+  $("readBtn").disabled = true;
+  let added = 0, dups = 0, unreadable = 0, error = "";
+  try {
+    for (let i = 0; i < files.length; i++) {
+      setStatus(`Reading ${i + 1} of ${files.length}…`);
+      const out = await api("extract", { image: await shrink(files[i]), mediaType: "image/jpeg" });
+      unreadable += out.unreadable || 0;
+      for (const it of out.items) {
+        const row = { restaurant, date, item: it.item || "", size: it.size || "", sale_price: it.sale_price || "", regular_price: it.regular_price || "", notes: it.notes || "" };
+        if (isDup(row)) dups++; else { data.push(row); added++; }
+      }
+    }
+  } catch (e) { error = e.message; }
+  showBad = false; render(); fillRestaurantSelect(); persist();
+  $("rest").value = restaurant; $("newRestWrap").hidden = $("rest").value !== NEW;
+  const parts = [`Read ${added} item(s).`];
+  if (dups) parts.push(`${dups} repeated item(s) from overlapping screenshots were skipped.`);
+  if (unreadable) parts.push(`⚠ ${unreadable} card(s) could not be read, so check the screenshot.`);
+  if (error) parts.push("Stopped: " + error);
+  else parts.push("Check the rows, then save them.");
+  setStatus(parts.join(" "), error || unreadable ? "err" : "ok");
+  $("readBtn").disabled = false;
+};
+
+$("saveBtn").onclick = async () => {
+  if (!data.length) return setStatus("Nothing to send.", "err");
+  showBad = true; render();
+  if (data.some((r) => FIELDS.some((f) => invalid(f, r))))
+    return setStatus("Fix the red cells (restaurant, pizza, size and sale price are required).", "err");
+  $("saveBtn").disabled = true;
+  try {
+    clearTimeout(saveTimer); saveTimer = null;
+    const { saved, replaced } = await api("save", { rows: data });
+    data = []; showBad = false; render();
+    setStatus(`Saved ${saved} price(s).` + (replaced ? ` ${replaced} replaced an earlier entry for the same restaurant, date, size and pizza.` : ""), "ok");
+    await loadHistory();
+  } catch (e) { setStatus(e.message, "err"); }
+  $("saveBtn").disabled = false;
+};
+
+$("clearBtn").onclick = () => { data = []; showBad = false; render(); persist(); setStatus(""); };
+
+$("delDateBtn").onclick = async () => {
+  const name = view, d = chosenDate[name];
+  if (!d || !confirm(`Delete all ${name} prices saved for ${niceDate(d)}? This cannot be undone.`)) return;
+  try {
+    await api("history", { action: "deleteDate", restaurant: name, date: d });
+    delete chosenDate[name];
+    await loadHistory();
+  } catch (e) { alert(e.message); }
+};
+
+$("dlBtn").onclick = async () => {
+  $("dlBtn").disabled = true; $("dlStatus").textContent = "Preparing…"; $("dlStatus").className = "muted";
+  try {
+    const { base64 } = await api("export", {});
+    const bytes = Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
+    const blob = new Blob([bytes], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob); a.download = `price-tracker-${today()}.xlsx`;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+    $("dlStatus").textContent = "Downloaded."; $("dlStatus").className = "ok";
+  } catch (e) { $("dlStatus").textContent = e.message; $("dlStatus").className = "err"; }
+  $("dlBtn").disabled = false;
+};
+
+if (password) showApp();
+</script>
+</body>
+</html>
