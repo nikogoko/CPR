@@ -1,5 +1,5 @@
 // Receives a menu screenshot, asks Claude to read it, returns structured rows.
-const { checkPassword } = require("../../lib/auth");
+const { denied } = require("../../lib/auth");
 
 const TOOL = {
   name: "record_menu",
@@ -36,7 +36,8 @@ const PROMPT =
 
 exports.handler = async (event) => {
   if (event.httpMethod !== "POST") return { statusCode: 405, body: "Method not allowed" };
-  if (!checkPassword(event)) return { statusCode: 401, body: JSON.stringify({ error: "Wrong password" }) };
+  const deny = denied(event);
+  if (deny) return deny;
 
   try {
     const { image, mediaType } = JSON.parse(event.body);

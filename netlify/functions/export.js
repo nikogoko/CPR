@@ -1,6 +1,6 @@
 // Builds an Excel file: "All data" (full history) + one grid sheet per restaurant (newest date).
 const ExcelJS = require("exceljs");
-const { checkPassword } = require("../../lib/auth");
+const { denied } = require("../../lib/auth");
 const { openStore, readAllHistory } = require("../../lib/store");
 
 const MONEY = '0.00"₾"';
@@ -22,7 +22,8 @@ const asNum = (v) => (typeof v === "number" && Number.isFinite(v) ? v : null);
 
 exports.handler = async (event) => {
   if (event.httpMethod !== "POST") return { statusCode: 405, body: "Method not allowed" };
-  if (!checkPassword(event)) return { statusCode: 401, body: JSON.stringify({ error: "Wrong password" }) };
+  const deny = denied(event);
+  if (deny) return deny;
 
   try {
     const records = (await readAllHistory(openStore(event))).filter((r) => r.rows.length);

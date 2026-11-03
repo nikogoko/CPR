@@ -43,6 +43,7 @@
 <div class="card" id="login">
   <label>Password <input type="password" id="pw"></label>
   <button id="loginBtn">Enter</button>
+  <div id="loginMsg" class="err"></div>
 </div>
 
 <div id="app" hidden>
@@ -138,14 +139,19 @@ function niceDate(iso) {
 }
 function setStatus(msg, cls) { $("status").textContent = msg; $("status").className = cls || ""; }
 
+function backToLogin(msg) {
+  password = ""; sessionStorage.removeItem("pw");
+  $("app").hidden = true; $("login").hidden = false; $("loginMsg").textContent = msg;
+}
+
 async function api(name, body) {
   const res = await fetch(`/.netlify/functions/${name}`, {
     method: "POST",
-    headers: { "content-type": "application/json", "x-site-password": password },
+    headers: { "content-type": "application/json", "x-site-password": encodeURIComponent(password) },
     body: JSON.stringify(body)
   });
   const out = await res.json().catch(() => ({}));
-  if (res.status === 401) { sessionStorage.removeItem("pw"); location.reload(); }
+  if (res.status === 401) { backToLogin("Wrong password. Please try again."); throw new Error("Wrong password"); }
   if (!res.ok) throw new Error(out.error || `Error ${res.status}`);
   return out;
 }
@@ -173,7 +179,13 @@ function showApp() {
   renderTabs(); fillRestaurantSelect();
   loadPending(); loadHistory();
 }
-$("loginBtn").onclick = () => { password = $("pw").value; sessionStorage.setItem("pw", password); showApp(); };
+$("loginBtn").onclick = async () => {
+  password = $("pw").value.trim(); $("loginMsg").textContent = ""; $("loginBtn").disabled = true;
+  try { await api("pending", { action: "load" }); sessionStorage.setItem("pw", password); showApp(); }   // check the password before opening the app
+  catch (e) { if (e.message !== "Wrong password") $("loginMsg").textContent = e.message; }
+  $("loginBtn").disabled = false;
+};
+$("pw").onkeydown = (e) => { if (e.key === "Enter") $("loginBtn").click(); };
 
 const restaurantsSaved = () => [...new Set(history.map((r) => r.restaurant))].sort((a, b) => a.localeCompare(b));
 

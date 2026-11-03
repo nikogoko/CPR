@@ -1,10 +1,11 @@
 // Stores the not-yet-sent rows so every device that logs in sees the same list.
 const { getStore, connectLambda } = require("@netlify/blobs");
-const { checkPassword } = require("../../lib/auth");
+const { denied } = require("../../lib/auth");
 
 exports.handler = async (event) => {
   if (event.httpMethod !== "POST") return { statusCode: 405, body: "Method not allowed" };
-  if (!checkPassword(event)) return { statusCode: 401, body: JSON.stringify({ error: "Wrong password" }) };
+  const deny = denied(event);
+  if (deny) return deny;
 
   try {
     connectLambda(event);

@@ -34,3 +34,9 @@ Everything (history and pending rows) is stored in Netlify Blobs, inside your Ne
 Deleting the Netlify site deletes the data, so press "Download Excel" now and then as a backup.
 
 Locally, use `netlify dev` (not a plain file server) so functions and Blobs work.
+
+## If the login says "Wrong password"
+- A new or changed SITE_PASSWORD only applies after the next deploy (Deploys -> Trigger deploy).
+- The variable must be named exactly SITE_PASSWORD, with the Functions scope and a value for the Production context.
+- If the page says "The server has no SITE_PASSWORD set", the site can't see the variable: fix the name/scope/context and redeploy.
+- Spaces around the password are ignored. Passwords in any language work. Capital letters count.
