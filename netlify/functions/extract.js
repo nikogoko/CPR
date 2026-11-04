@@ -1,7 +1,6 @@
 // Receives a menu screenshot, asks Claude to read it, returns structured rows.
 const Anthropic = require("@anthropic-ai/sdk");
 const { denied } = require("../../lib/auth");
-const { PLATFORMS } = require("../../lib/platforms");
 
 // Structured output: the reply is guaranteed to be valid JSON in exactly this shape.
 // (This model does not allow forcing a tool, so we ask for a JSON reply instead.)
@@ -10,7 +9,6 @@ const FORMAT = {
   schema: {
     type: "object",
     properties: {
-      platform: { type: "string", enum: [...PLATFORMS, "unknown"], description: "Which delivery app this screenshot comes from, judged by its logo, name, colours and layout. Answer \"unknown\" if you cannot tell." },
       items: {
         type: "array",
         items: {
@@ -30,14 +28,13 @@ const FORMAT = {
       },
       unreadable_cards: { type: "integer", description: "Number of product cards you could see but could not read reliably" }
     },
-    required: ["platform", "items", "unreadable_cards"],
+    required: ["items", "unreadable_cards"],
     additionalProperties: false
   }
 };
 
 const PROMPT =
   "This is a screenshot of one menu category of a restaurant in a food-delivery app (the text may be Georgian). " +
-  "First work out which delivery app the screenshot comes from (" + PLATFORMS.join(" or ") + "); if you are not sure, answer unknown rather than guessing. " +
   "Then record EVERY product card visible; there may be 20 or more. " +
   "Products are grouped under headlines (category titles). A screenshot may show several headlines: give every product the headline directly above it. " +
   "The page may also have a side menu that lists many categories with one entry looking highlighted (darker or bold): that entry is the category currently open. " +
@@ -79,8 +76,7 @@ exports.handler = async (event) => {
     const text = response.content.find((b) => b.type === "text")?.text;
     let out;
     try { out = JSON.parse(text); } catch { return fail(502, "Claude's reply could not be understood. Please try again."); }
-    const platform = PLATFORMS.includes(out.platform) ? out.platform : "unknown";
-    return { statusCode: 200, body: JSON.stringify({ platform, items: (out.items || []).map(({ headline, ...rest }) => ({ ...rest, size: headline })), unreadable: out.unreadable_cards || 0 }) };
+    return { statusCode: 200, body: JSON.stringify({ items: (out.items || []).map(({ headline, ...rest }) => ({ ...rest, size: headline })), unreadable: out.unreadable_cards || 0 }) };
   } catch (e) {
     if (e instanceof Anthropic.AuthenticationError)
       return fail(502, "Anthropic rejected the API key. Check ANTHROPIC_API_KEY in Netlify (re-paste it, no spaces) and redeploy.");
