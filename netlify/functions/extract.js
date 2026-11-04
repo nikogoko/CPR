@@ -14,7 +14,7 @@ const FORMAT = {
         items: {
           type: "object",
           properties: {
-            item: { type: "string", description: "Product name exactly as written (keep the original script, do not translate)" },
+            item: { type: "string", description: "Product name copied character for character from the image (original script, no translation, no synonyms, no spelling fixes; keep text in two languages and slashes exactly as shown)" },
             headline: { type: "string", description: "The headline (menu category title) this product sits directly under, copied exactly as written in its original language, including any size in it, e.g. \"ნეაპოლიტანური პიცა 33 სმ\". Do not translate or shorten it. Empty string if no headline is visible above the product." },
             sale_price: { type: "string", description: "Current price, digits only like 34.00, no currency" },
             regular_price: { type: "string", description: "Struck-through old price, digits only. Empty string if the card has none." },
@@ -36,7 +36,11 @@ const FORMAT = {
 
 const PROMPT =
   "This is a screenshot of one menu category of a restaurant in a food-delivery app (the text may be Georgian). " +
-  "Then record EVERY product card visible; there may be 20 or more. " +
+  "Record EVERY product card visible; there may be 20 or more. " +
+  "Copy every item name, headline and offer text exactly as it appears in the image, character for character. " +
+  "Never replace a word with a synonym or a word you think is better, never translate, never correct or tidy the spelling, and never drop or add words. " +
+  "For example, if the image says 'სამარხვო / VEGAN' you must write 'სამარხვო / VEGAN', not 'ვეგანური / VEGAN'. " +
+  "Keep names in two languages, slashes, brackets and spacing exactly as shown. " +
   "Products are grouped under headlines (category titles). A screenshot may show several headlines: give every product the headline directly above it. " +
   "The page may also have a side menu that lists many categories with one entry looking highlighted (darker or bold): that entry is the category currently open. " +
   "Do not treat the other entries of that side menu as headlines of the products. Use the highlighted entry as the headline only when no title is shown above the products themselves. " +

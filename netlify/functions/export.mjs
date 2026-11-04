@@ -1,6 +1,6 @@
 // Builds an Excel file: "All data" (full history) + one sheet per restaurant with a Glovo part and a Wolt part (newest date of each).
 import ExcelJS from "exceljs";
-import { guard, json } from "../../lib/http.mjs";
+import { guard, json, readBody } from "../../lib/http.mjs";
 import { openStore, readAllHistory } from "../../lib/store.mjs";
 import platforms from "../../lib/platforms.js";
 
@@ -41,8 +41,22 @@ export default async (req) => {
   if (blocked) return blocked;
 
   try {
-    const records = (await readAllHistory(await openStore())).filter((r) => r.rows.length);
+    const { restaurant, platform, date } = await readBody(req);   // all optional: narrow the file to one restaurant / platform / day
+    let records = (await readAllHistory(await openStore())).filter((r) => r.rows.length);
     if (!records.length) return json(400, { error: "No saved prices yet." });
+    let narrowed = false;
+    if (typeof restaurant === "string" && restaurant.trim()) {
+      narrowed = true;
+      const want = restaurant.trim().toLowerCase();
+      records = records.filter((r) => String(r.name).trim().toLowerCase() === want);
+    }
+    if (typeof date === "string" && /^\d{4}-\d{2}-\d{2}$/.test(date)) {
+      narrowed = true;
+      records = records
+        .map((r) => ({ ...r, rows: r.rows.filter((x) => x.date === date && (typeof platform !== "string" || (x.platform || "") === platform)) }))
+        .filter((r) => r.rows.length);
+    }
+    if (!records.length) return json(400, { error: narrowed ? "Nothing is saved for that selection." : "No saved prices yet." });
     records.sort((a, b) => a.name.localeCompare(b.name));
 
     const wb = new ExcelJS.Workbook();

@@ -47,6 +47,8 @@
   button:focus-visible, input:focus-visible, select:focus-visible { outline: 3px solid var(--cheese); outline-offset: 2px; }
 
   .topbar { display: flex; flex-wrap: wrap; gap: 12px; justify-content: space-between; align-items: center; margin-bottom: 18px; }
+  .dl { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: flex-end; }
+  .dl select { max-width: 280px; }
   nav { display: flex; flex-wrap: wrap; gap: 8px; }
   nav button { background: var(--paper); color: var(--ink); border: 1.5px solid var(--line); padding: 8px 18px; }
   nav button:not(.active):hover:not(:disabled) { background: #f6e6c4; }
@@ -144,7 +146,11 @@
 <div id="app" hidden>
   <div class="topbar">
     <nav id="tabs"></nav>
-    <div><button class="secondary" id="dlBtn">⬇ Download Excel</button> <span id="dlStatus" class="muted"></span></div>
+    <div class="dl">
+      <select id="dlScope" aria-label="What to download"></select>
+      <button class="secondary" id="dlBtn">⬇ Download Excel</button>
+      <span id="dlStatus" class="muted"></span>
+    </div>
   </div>
 
   <!-- ADD TAB -->
@@ -331,7 +337,7 @@ function renderTabs() {
   const add = (label, v) => {
     const b = document.createElement("button");
     b.textContent = label; b.className = view === v ? "active" : "";
-    b.onclick = () => { view = v; delete chosenPlatform[v]; Object.keys(chosenDate).forEach((k) => { if (k.startsWith(v + "|")) delete chosenDate[k]; }); Object.keys(chosenHeadline).forEach((k) => { if (k.startsWith(v + "|")) delete chosenHeadline[k]; }); renderTabs(); showView(); };   // opening a tab always starts on the newest date
+    b.onclick = () => { view = v; $("dlScope").value = "all"; delete chosenPlatform[v]; Object.keys(chosenDate).forEach((k) => { if (k.startsWith(v + "|")) delete chosenDate[k]; }); Object.keys(chosenHeadline).forEach((k) => { if (k.startsWith(v + "|")) delete chosenHeadline[k]; }); renderTabs(); showView(); };   // opening a tab always starts on the newest date
     nav.appendChild(b);
   };
   add("➕ Add", "add");
@@ -340,7 +346,21 @@ function renderTabs() {
 function showView() {
   $("addView").hidden = view !== "add";
   $("restView").hidden = view === "add";
-  if (view !== "add") renderRestaurant();
+  if (view !== "add") renderRestaurant(); else refreshDownloadScopes();
+}
+
+// What the Download button includes: everything, or (on a restaurant tab) just that restaurant, or just the day shown.
+function refreshDownloadScopes() {
+  const options = [["all", "Everything"]];
+  if (view !== "add") {
+    options.push(["restaurant", `${view}: all dates, both apps`]);
+    const plat = chosenPlatform[view], d = chosenDate[view + "|" + plat];
+    if (d) options.push(["day", `${view} · ${platformLabel(plat)} · ${niceDate(d)}`]);
+  }
+  const sel = $("dlScope"), prev = sel.value;
+  sel.innerHTML = "";
+  options.forEach(([v, t]) => { const o = document.createElement("option"); o.value = v; o.textContent = t; sel.appendChild(o); });
+  sel.value = options.some(([v]) => v === prev) ? prev : "all";
 }
 
 function fillRestaurantSelect() {
@@ -442,11 +462,12 @@ function renderRestaurant() {
   $("dateRow").hidden = $("gridWrap").hidden = $("legend").hidden = empty;
   $("platEmpty").hidden = !empty;
   $("platEmpty").textContent = `No ${platformLabel(plat)} prices saved yet for ${name}.`;
-  if (empty) return;
+  if (empty) { refreshDownloadScopes(); return; }
 
   const dKey = name + "|" + plat;
   const d = dates.includes(chosenDate[dKey]) ? chosenDate[dKey] : dates[0];
   chosenDate[dKey] = d;
+  refreshDownloadScopes();
 
   const sel = $("dateSel"); sel.innerHTML = "";
   dates.forEach((x, i) => { const o = document.createElement("option"); o.value = x; o.textContent = niceDate(x) + (i === 0 ? " (newest)" : ""); sel.appendChild(o); });
@@ -696,11 +717,17 @@ $("delDateBtn").onclick = async () => {
 $("dlBtn").onclick = async () => {
   $("dlBtn").disabled = true; $("dlStatus").textContent = "Preparing…"; $("dlStatus").className = "muted";
   try {
-    const { base64 } = await api("export", {});
+    const scope = $("dlScope").value, name = view, plat = chosenPlatform[name];
+    const body = {};
+    if (scope !== "all") body.restaurant = name;
+    if (scope === "day") { body.platform = plat; body.date = chosenDate[name + "|" + plat]; }
+    const fileName = scope === "all" ? `price-tracker-${today()}.xlsx`
+      : `${name}${scope === "day" ? `-${platformLabel(plat)}-${body.date}` : ""}.xlsx`.replace(/[\\/:*?"<>|]/g, "-");
+    const { base64 } = await api("export", body);
     const bytes = Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
     const blob = new Blob([bytes], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
     const a = document.createElement("a");
-    a.href = URL.createObjectURL(blob); a.download = `price-tracker-${today()}.xlsx`;
+    a.href = URL.createObjectURL(blob); a.download = fileName;
     document.body.appendChild(a); a.click(); a.remove();
     setTimeout(() => URL.revokeObjectURL(a.href), 2000);
     $("dlStatus").textContent = "Downloaded."; $("dlStatus").className = "ok";
