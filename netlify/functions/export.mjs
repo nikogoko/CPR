@@ -60,19 +60,20 @@ export default async (req) => {
       { header: "Sale price", key: "sale", width: 12 },
       { header: "Regular price", key: "reg", width: 14 },
       { header: "Offer", key: "notes", width: 44 },
-      { header: "Popular", key: "popular", width: 10 }
+      { header: "Popular", key: "popular", width: 10 },
+      { header: "New", key: "isNew", width: 8 }
     ];
     for (const rec of records) {
       const sorted = [...rec.rows].sort((a, b) => b.date.localeCompare(a.date));
       for (const r of sorted)
-        all.addRow({ restaurant: rec.name, platform: platformLabel(platformOf(r)), date: new Date(r.date + "T00:00:00Z"), item: r.item, size: r.size, sale: asNum(r.sale_price), reg: asNum(r.regular_price), notes: r.notes, popular: r.popular ? "Yes" : "" });
+        all.addRow({ restaurant: rec.name, platform: platformLabel(platformOf(r)), date: new Date(r.date + "T00:00:00Z"), item: r.item, size: r.size, sale: asNum(r.sale_price), reg: asNum(r.regular_price), notes: r.notes, popular: r.popular ? "Yes" : "", isNew: r.isNew ? "Yes" : "" });
     }
     all.getColumn("date").numFmt = "d mmmm yyyy"; // real dates, so Excel can still sort and filter them
     all.getColumn("sale").numFmt = MONEY;
     all.getColumn("reg").numFmt = MONEY;
     styleHeader(all.getRow(1));
     all.pageSetup = PRINT;
-    all.autoFilter = "A1:I1";
+    all.autoFilter = "A1:J1";
 
     // One sheet per restaurant, in two parts: the Glovo grid on top, the Wolt grid below.
     // Each part is items as rows and headlines as columns, for that platform's newest date.
@@ -81,7 +82,7 @@ export default async (req) => {
       const platforms = [...new Set(rec.rows.map(platformOf))].sort((x, y) => order(x) - order(y));
       const ws = wb.addWorksheet(sheetName(rec.name, used));
       ws.addRow([rec.name]).font = { bold: true, size: 16, color: { argb: "FFB8321F" } };
-      let widest = 1, anyPopular = false;
+      let widest = 1, anyPopular = false, anyNew = false;
       const need = {};   // column width needed by the longest headline in that column
 
       for (const plat of platforms) {
@@ -93,6 +94,8 @@ export default async (req) => {
         const cell = new Map(rows.map((r) => [r.item + "\u0000" + r.size, r]));
         const popular = new Set(rows.filter((r) => r.popular).map((r) => r.item));   // marked Popular on the app
         if (popular.size) anyPopular = true;
+        const fresh = new Set(rows.filter((r) => r.isNew).map((r) => r.item));   // marked New on the app
+        if (fresh.size) anyNew = true;
         widest = Math.max(widest, sizes.length + 1);
 
         ws.addRow([]);
@@ -102,11 +105,14 @@ export default async (req) => {
         for (let c = 2; c <= sizes.length + 1; c++) { head.getCell(c).alignment = { vertical: "middle", wrapText: true, ...CENTER }; need[c] = Math.max(need[c] || 12, Math.min(30, sizes[c - 2].length + 2)); }
         if (sizes.some((s) => s.length > 14)) head.height = 46;   // room for a two-line headline
         for (const p of pizzas) {
-          const row = ws.addRow([p + (popular.has(p) ? " ★" : ""), ...sizes.map((s) => asNum(cell.get(p + "\u0000" + s)?.sale_price))]);
+          const row = ws.addRow([p + (popular.has(p) ? " ★" : "") + (fresh.has(p) ? " (New)" : ""), ...sizes.map((s) => asNum(cell.get(p + "\u0000" + s)?.sale_price))]);
           for (let c = 2; c <= sizes.length + 1; c++) { row.getCell(c).numFmt = MONEY; row.getCell(c).alignment = CENTER; }
         }
       }
-      if (anyPopular) { ws.addRow([]); ws.addRow(["★ = marked Popular on the app"]).font = { italic: true, color: { argb: "FF7A6552" } }; }
+      const legend = [];
+      if (anyPopular) legend.push("★ = marked Popular on the app");
+      if (anyNew) legend.push("(New) = marked New on the app");
+      if (legend.length) { ws.addRow([]); legend.forEach((t) => { ws.addRow([t]).font = { italic: true, color: { argb: "FF7A6552" } }; }); }
       ws.getColumn(1).width = 42;
       for (let c = 2; c <= widest; c++) ws.getColumn(c).width = need[c] || 12;
       ws.pageSetup = PRINT;

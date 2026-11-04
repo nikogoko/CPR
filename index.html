@@ -94,6 +94,8 @@
   .chg { margin-left: 8px; font-size: .85rem; font-weight: 700; white-space: nowrap; }
   .chg.up { color: var(--up); } .chg.down { color: var(--down); }
   .pop { display: inline-block; margin-top: 5px; padding: 2px 9px; border-radius: 999px; background: var(--cheese); color: var(--ink); font-size: .72rem; font-weight: 700; letter-spacing: .03em; }
+  .pop.new { background: #2f6b3a; color: #fff; }
+  .pop + .pop { margin-left: 6px; }
   td.c { text-align: center; vertical-align: middle; }
   td input[type=checkbox] { width: 20px; height: 20px; padding: 0; accent-color: var(--sauce); cursor: pointer; }
   .legend { font-size: .85rem; color: var(--muted); margin: 12px 0 0; }
@@ -170,7 +172,7 @@
     <div class="card" id="results" hidden>
       <div class="scroll">
         <table>
-          <thead><tr><th>Restaurant</th><th>Platform</th><th>Item</th><th>Headline</th><th>Sale price</th><th>Regular price</th><th>Offer</th><th>Popular</th><th></th></tr></thead>
+          <thead><tr><th>Restaurant</th><th>Platform</th><th>Item</th><th>Headline</th><th>Sale price</th><th>Regular price</th><th>Offer</th><th>Popular</th><th>New</th><th></th></tr></thead>
           <tbody id="rows"></tbody>
         </table>
       </div>
@@ -208,7 +210,7 @@
 
 <script>
 const $ = (id) => document.getElementById(id);
-const FIELDS = ["restaurant", "platform", "item", "size", "sale_price", "regular_price", "notes", "popular"];
+const FIELDS = ["restaurant", "platform", "item", "size", "sale_price", "regular_price", "notes", "popular", "isNew"];
 const PLATFORMS = ["Glovo", "Wolt"];   // keep in sync with lib/platforms.js
 const platformLabel = (p) => p || "No platform";   // older entries saved before platforms existed
 const NEW = "__new";
@@ -349,6 +351,15 @@ async function loadHistoryUntilSeen(rows) {
   }
 }
 
+// Small tags under an item: "★ Popular" and "New", as the app shows them.
+function tagsFor(r) {
+  if (!r.popular && !r.isNew) return null;
+  const box = document.createElement("div");
+  if (r.popular) { const p = document.createElement("span"); p.className = "pop"; p.textContent = "★ Popular"; box.appendChild(p); }
+  if (r.isNew) { const p = document.createElement("span"); p.className = "pop new"; p.textContent = "New"; box.appendChild(p); }
+  return box;
+}
+
 // One headline as its own table: item, price (with change arrow), regular price, offer.
 function renderOneHeadline(grid, rows, before) {
   grid.className = "grid single";
@@ -360,7 +371,7 @@ function renderOneHeadline(grid, rows, before) {
   for (const r of latest.values()) {
     const tr = body.insertRow();
     const nameCell = tr.insertCell(); nameCell.textContent = r.item;
-    if (r.popular) { const t = document.createElement("div"), pill = document.createElement("span"); pill.className = "pop"; pill.textContent = "★ Popular"; t.appendChild(pill); nameCell.appendChild(t); }
+    const tags = tagsFor(r); if (tags) nameCell.appendChild(tags);
     const priceCell = tr.insertCell(), b = document.createElement("strong"); b.textContent = money(r.sale_price); priceCell.appendChild(b);
     const old = before.get(r.item + "\u0000" + r.size), diff = old ? numOf(r.sale_price) - numOf(old.sale_price) : 0;
     if (Math.abs(diff) >= 0.005) {
@@ -456,7 +467,7 @@ function renderRestaurant() {
       }
       if (r.regular_price !== "" && r.regular_price != null) { const o = document.createElement("s"); o.textContent = money(r.regular_price); td.appendChild(o); }
       if (r.notes) { const n = document.createElement("div"); n.className = "note"; n.textContent = r.notes; td.appendChild(n); }
-      if (r.popular) { const t = document.createElement("div"); const pill = document.createElement("span"); pill.className = "pop"; pill.textContent = "★ Popular"; t.appendChild(pill); td.appendChild(t); }
+      const tags = tagsFor(r); if (tags) td.appendChild(tags);
     });
   });
 }
@@ -515,7 +526,7 @@ function render() {
   [...groups.keys()].sort().forEach((k) => {
     const idxs = groups.get(k), first = data[idxs[0]];
     const h = document.createElement("tr"); h.className = "group";
-    h.innerHTML = `<td colspan="9"></td>`;
+    h.innerHTML = `<td colspan="10"></td>`;
     h.firstChild.textContent = `${first.restaurant.trim() || "(no restaurant)"} · ${first.platform || "(no platform)"} · ${niceDate(first.date)} · ${idxs.length} item${idxs.length > 1 ? "s" : ""}`;
     tbody.appendChild(h);
     idxs.forEach((i) => {
@@ -528,7 +539,7 @@ function render() {
           PLATFORMS.forEach((p) => { const o = document.createElement("option"); o.value = o.textContent = p; inp.appendChild(o); });
           inp.value = data[i][f] || "";   // an unknown/empty value leaves it blank and gets flagged on save
           inp.onchange = () => { data[i][f] = inp.value; persist(); render(); };   // regroup under the right platform
-        } else if (f === "popular") {   // tick box: the "Popular" badge on the app
+        } else if (f === "popular" || f === "isNew") {   // tick boxes: the "Popular" / "New" badges on the app
           td.className = "c";
           inp = document.createElement("input"); inp.type = "checkbox";
           inp.checked = data[i][f] === true;
@@ -575,7 +586,7 @@ $("readBtn").onclick = async () => {
       if (choice === "auto") { if (detected) seen[detected] = (seen[detected] || 0) + 1; else unsure.push(files[i].name); }
       else if (detected && detected !== choice) disagree.push(`${files[i].name} looks like ${detected}`);
       for (const it of out.items) {
-        const row = { restaurant, platform, date, item: it.item || "", size: it.size || "", sale_price: it.sale_price || "", regular_price: it.regular_price || "", notes: it.notes || "", popular: it.popular === true };
+        const row = { restaurant, platform, date, item: it.item || "", size: it.size || "", sale_price: it.sale_price || "", regular_price: it.regular_price || "", notes: it.notes || "", popular: it.popular === true, isNew: it.isNew === true };
         if (isDup(row)) dups++; else { data.push(row); added++; }
       }
     }
