@@ -38,7 +38,7 @@ export default async (req) => {
       if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return bad(`Row "${item}" has an invalid date.`);
       const k = historyKey(restaurant);
       if (!byRestaurant.has(k)) byRestaurant.set(k, []);
-      byRestaurant.get(k).push({ restaurant, platform, item, size, sale_price: sale, regular_price: regular, notes, popular: r.popular === true, isNew: r.isNew === true, date });
+      byRestaurant.get(k).push({ restaurant, platform, item, size, sale_price: sale, regular_price: regular, notes, popular: r.popular === true, isNew: r.isNew === true, age18: r.age18 === true, date });
     }
 
     const store = await openStore();

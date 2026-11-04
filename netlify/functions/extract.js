@@ -18,11 +18,12 @@ const FORMAT = {
             headline: { type: "string", description: "The headline (menu category title) this product sits directly under, copied exactly as written in its original language, including any size in it, e.g. \"ნეაპოლიტანური პიცა 33 სმ\". Do not translate or shorten it. Empty string if no headline is visible above the product." },
             sale_price: { type: "string", description: "Current price, digits only like 34.00, no currency" },
             regular_price: { type: "string", description: "Struck-through old price, digits only. Empty string if the card has none." },
-            notes: { type: "string", description: "Discount or offer line on the card, exactly as written (e.g. '20% discount on selected products'). Do NOT include the Popular or New badges here. Empty string if none." },
+            notes: { type: "string", description: "Discount or offer line on the card, exactly as written (e.g. '20% discount on selected products'). Do NOT include the Popular, New or 18+ badges here. Empty string if none." },
             popular: { type: "boolean", description: "true only if the card shows the 'Popular' badge (in Georgian: პოპულარული), otherwise false" },
-            isNew: { type: "boolean", description: "true only if the card shows a 'New' badge (in Georgian: ახალი), otherwise false" }
+            isNew: { type: "boolean", description: "true only if the card shows a 'New' badge (in Georgian: ახალი), otherwise false" },
+            age18: { type: "boolean", description: "true only if the card shows an 18+ / age-restricted badge or label (for example '18+'), otherwise false" }
           },
-          required: ["item", "headline", "sale_price", "regular_price", "notes", "popular", "isNew"],
+          required: ["item", "headline", "sale_price", "regular_price", "notes", "popular", "isNew", "age18"],
           additionalProperties: false
         }
       },
