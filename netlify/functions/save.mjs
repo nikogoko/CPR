@@ -1,7 +1,9 @@
 // Saves confirmed rows into the price history (Netlify Blobs) and empties the pending list.
-const { denied } = require("../../lib/auth");
-const { openStore, historyKey } = require("../../lib/store");
-const { PLATFORMS } = require("../../lib/platforms");
+import { guard, json, readBody } from "../../lib/http.mjs";
+import { openStore, historyKey } from "../../lib/store.mjs";
+import platforms from "../../lib/platforms.js";
+
+const { PLATFORMS } = platforms;
 
 function num(v) {
   let s = String(v ?? "").replace(/[^\d.,]/g, "");
@@ -11,17 +13,16 @@ function num(v) {
   return parseFloat(s);
 }
 const clean = (v) => String(v ?? "").trim().slice(0, 200);
-const bad = (msg) => ({ statusCode: 400, body: JSON.stringify({ error: msg }) });
+const bad = (msg) => json(400, { error: msg });
 // Same restaurant + platform + date + size + pizza is the same entry.
 const rowKey = (r) => `${r.date}|${(r.platform || "").toLowerCase()}|${r.size.toLowerCase()}|${r.item.toLowerCase()}`;
 
-exports.handler = async (event) => {
-  if (event.httpMethod !== "POST") return { statusCode: 405, body: "Method not allowed" };
-  const deny = denied(event);
-  if (deny) return deny;
+export default async (req) => {
+  const blocked = guard(req);
+  if (blocked) return blocked;
 
   try {
-    const { rows } = JSON.parse(event.body || "{}");
+    const { rows } = await readBody(req);
     if (!Array.isArray(rows) || !rows.length || rows.length > 500) return bad("Send between 1 and 500 rows.");
 
     const byRestaurant = new Map();
@@ -37,10 +38,10 @@ exports.handler = async (event) => {
       if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return bad(`Row "${item}" has an invalid date.`);
       const k = historyKey(restaurant);
       if (!byRestaurant.has(k)) byRestaurant.set(k, []);
-      byRestaurant.get(k).push({ restaurant, platform, item, size, sale_price: sale, regular_price: regular, notes, date });
+      byRestaurant.get(k).push({ restaurant, platform, item, size, sale_price: sale, regular_price: regular, notes, popular: r.popular === true, date });
     }
 
-    const store = openStore(event);
+    const store = await openStore();
     let replaced = 0;
     for (const [k, incoming] of byRestaurant) {
       const existing = (await store.get(k, { type: "json" })) || { name: incoming[0].restaurant, rows: [] };
@@ -55,8 +56,8 @@ exports.handler = async (event) => {
     }
 
     await store.setJSON("pending", []); // saved, so empty the shared pending list
-    return { statusCode: 200, body: JSON.stringify({ saved: rows.length, replaced }) };
+    return json(200, { saved: rows.length, replaced });
   } catch (e) {
-    return { statusCode: 500, body: JSON.stringify({ error: e.message }) };
+    return json(500, { error: e.message });
   }
 };

@@ -1,6 +1,7 @@
 // Receives a menu screenshot, asks Claude to read it, returns structured rows.
 const Anthropic = require("@anthropic-ai/sdk");
 const { denied } = require("../../lib/auth");
+const { PLATFORMS } = require("../../lib/platforms");
 
 // Structured output: the reply is guaranteed to be valid JSON in exactly this shape.
 // (This model does not allow forcing a tool, so we ask for a JSON reply instead.)
@@ -9,6 +10,7 @@ const FORMAT = {
   schema: {
     type: "object",
     properties: {
+      platform: { type: "string", enum: [...PLATFORMS, "unknown"], description: "Which delivery app this screenshot comes from, judged by its logo, name, colours and layout. Answer \"unknown\" if you cannot tell." },
       items: {
         type: "array",
         items: {
@@ -18,22 +20,24 @@ const FORMAT = {
             size: { type: "string", description: "Size from the category heading, written like '33 cm'. Empty string if no heading is visible." },
             sale_price: { type: "string", description: "Current price, digits only like 34.00, no currency" },
             regular_price: { type: "string", description: "Struck-through old price, digits only. Empty string if the card has none." },
-            notes: { type: "string", description: "Discount line and badge text on the card, exactly as written (e.g. '20% discount on selected products', 'Popular'). Empty string if none." }
+            notes: { type: "string", description: "Discount or offer line on the card, exactly as written (e.g. '20% discount on selected products'). Do NOT include the Popular badge here. Empty string if none." },
+            popular: { type: "boolean", description: "true only if the card shows the 'Popular' badge (in Georgian: პოპულარული), otherwise false" }
           },
-          required: ["item", "size", "sale_price", "regular_price", "notes"],
+          required: ["item", "size", "sale_price", "regular_price", "notes", "popular"],
           additionalProperties: false
         }
       },
       unreadable_cards: { type: "integer", description: "Number of product cards you could see but could not read reliably" }
     },
-    required: ["items", "unreadable_cards"],
+    required: ["platform", "items", "unreadable_cards"],
     additionalProperties: false
   }
 };
 
 const PROMPT =
   "This is a screenshot of one menu category of a restaurant in a food-delivery app (the text may be Georgian). " +
-  "Record EVERY product card visible; there may be 20 or more. " +
+  "First work out which delivery app the screenshot comes from (" + PLATFORMS.join(" or ") + "); if you are not sure, answer unknown rather than guessing. " +
+  "Then record EVERY product card visible; there may be 20 or more. " +
   "Ignore floating banners or promos that apply to the whole order (for example 'get ₾12 off ₾30 orders'), buttons, and the page description text. " +
   "If a card is partly hidden and its name or price cannot be read, do not guess: skip it and count it in unreadable_cards. " +
   "Never invent values.";
@@ -71,7 +75,8 @@ exports.handler = async (event) => {
     const text = response.content.find((b) => b.type === "text")?.text;
     let out;
     try { out = JSON.parse(text); } catch { return fail(502, "Claude's reply could not be understood. Please try again."); }
-    return { statusCode: 200, body: JSON.stringify({ items: out.items || [], unreadable: out.unreadable_cards || 0 }) };
+    const platform = PLATFORMS.includes(out.platform) ? out.platform : "unknown";
+    return { statusCode: 200, body: JSON.stringify({ platform, items: out.items || [], unreadable: out.unreadable_cards || 0 }) };
   } catch (e) {
     if (e instanceof Anthropic.AuthenticationError)
       return fail(502, "Anthropic rejected the API key. Check ANTHROPIC_API_KEY in Netlify (re-paste it, no spaces) and redeploy.");

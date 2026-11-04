@@ -64,9 +64,12 @@
   th, td { text-align: left; padding: 4px; vertical-align: top; }
   th { font-size: .75rem; text-transform: uppercase; letter-spacing: .07em; color: var(--muted); font-weight: 700; padding: 6px 4px; }
   td input { width: 100%; padding: 7px 9px; }
-  td input.bad { border-color: var(--down); background: #fdecea; }
-  #results table { min-width: 900px; }
-  #results td:nth-child(2) { min-width: 92px; } #results td:nth-child(3) { min-width: 150px; } #results td:nth-child(7) { min-width: 160px; }
+  td input.bad, td select.bad { border-color: var(--down); background: #fdecea; }
+  #results table { min-width: 880px; }
+  #results td:nth-child(2) { min-width: 88px; } #results td:nth-child(3) { min-width: 130px; } #results td:nth-child(7) { min-width: 120px; }
+  #results td, #results th { padding-left: 3px; padding-right: 3px; }
+  #results td input[type=text], #results td select { padding: 7px 7px; }
+  #results td button { padding: 8px 13px; }
   td select { width: 100%; padding: 7px 9px; }
   tr.group td { background: #f8e7bd; font-weight: 700; padding: 10px 12px; border-left: 5px solid var(--sauce); border-radius: 6px; }
 
@@ -88,6 +91,9 @@
   .grid .note { font-size: .8rem; font-weight: 600; color: var(--offer); margin-top: 2px; }
   .chg { margin-left: 8px; font-size: .85rem; font-weight: 700; white-space: nowrap; }
   .chg.up { color: var(--up); } .chg.down { color: var(--down); }
+  .pop { display: inline-block; margin-top: 5px; padding: 2px 9px; border-radius: 999px; background: var(--cheese); color: var(--ink); font-size: .72rem; font-weight: 700; letter-spacing: .03em; }
+  td.c { text-align: center; vertical-align: middle; }
+  td input[type=checkbox] { width: 20px; height: 20px; padding: 0; accent-color: var(--sauce); cursor: pointer; }
   .legend { font-size: .85rem; color: var(--muted); margin: 12px 0 0; }
 
   /* Glovo / Wolt switch inside a restaurant */
@@ -162,7 +168,7 @@
     <div class="card" id="results" hidden>
       <div class="scroll">
         <table>
-          <thead><tr><th>Restaurant</th><th>Platform</th><th>Pizza</th><th>Size</th><th>Sale price</th><th>Regular price</th><th>Offer</th><th></th></tr></thead>
+          <thead><tr><th>Restaurant</th><th>Platform</th><th>Pizza</th><th>Size</th><th>Sale price</th><th>Regular price</th><th>Offer</th><th>Popular</th><th></th></tr></thead>
           <tbody id="rows"></tbody>
         </table>
       </div>
@@ -197,7 +203,7 @@
 
 <script>
 const $ = (id) => document.getElementById(id);
-const FIELDS = ["restaurant", "platform", "item", "size", "sale_price", "regular_price", "notes"];
+const FIELDS = ["restaurant", "platform", "item", "size", "sale_price", "regular_price", "notes", "popular"];
 const PLATFORMS = ["Glovo", "Wolt"];   // keep in sync with lib/platforms.js
 const platformLabel = (p) => p || "No platform";   // older entries saved before platforms existed
 const NEW = "__new";
@@ -271,7 +277,8 @@ function shrink(file, max = 1800) {
 function showApp() {
   $("login").hidden = true; $("app").hidden = false;
   $("date").value = today();
-  const ps = $("platform"); if (!ps.options.length) PLATFORMS.forEach((p) => { const o = document.createElement("option"); o.value = o.textContent = p; ps.appendChild(o); });
+  const ps = $("platform");   // "Auto-detect" first, then each app
+  if (!ps.options.length) [["auto", "Auto-detect"], ...PLATFORMS.map((p) => [p, p])].forEach(([v, t]) => { const o = document.createElement("option"); o.value = v; o.textContent = t; ps.appendChild(o); });
   renderTabs(); fillRestaurantSelect();
   loadPending(); loadHistory();
 }
@@ -322,6 +329,18 @@ async function loadHistory() {
   catch (e) { setStatus("Could not load saved prices: " + e.message, "err"); }
   if (view !== "add" && !restaurantsSaved().includes(view)) view = "add";
   renderTabs(); fillRestaurantSelect(); showView();
+}
+
+// After saving, make sure the saved rows really show up. If the server has not caught up yet, ask again a few times.
+async function loadHistoryUntilSeen(rows) {
+  const seen = () => rows.every((r) => history.some((h) =>
+    key(h.restaurant) === key(r.restaurant) && (h.platform || "") === r.platform && h.date === r.date &&
+    key(h.size) === key(r.size) && key(h.item) === key(r.item)));
+  for (let attempt = 0; attempt < 6; attempt++) {
+    await loadHistory();
+    if (seen()) return;
+    await new Promise((resolve) => setTimeout(resolve, 1500 * (attempt + 1)));
+  }
 }
 
 function renderRestaurant() {
@@ -392,6 +411,7 @@ function renderRestaurant() {
       }
       if (r.regular_price !== "" && r.regular_price != null) { const o = document.createElement("s"); o.textContent = money(r.regular_price); td.appendChild(o); }
       if (r.notes) { const n = document.createElement("div"); n.className = "note"; n.textContent = r.notes; td.appendChild(n); }
+      if (r.popular) { const t = document.createElement("div"); const pill = document.createElement("span"); pill.className = "pop"; pill.textContent = "★ Popular"; t.appendChild(pill); td.appendChild(t); }
     });
   });
 }
@@ -416,6 +436,18 @@ function persist() {
 document.addEventListener("visibilitychange", () => {
   if (!document.hidden && !$("app").hidden && !saveTimer) { loadPending(); loadHistory(); }
 });
+// Leaving or refreshing the page: send any edit that is still waiting for its 0.6s timer right now.
+function flushPending() {
+  if (!saveTimer) return;
+  clearTimeout(saveTimer); saveTimer = null;
+  fetch("/.netlify/functions/pending", {
+    method: "POST", keepalive: true,
+    headers: { "content-type": "application/json", "x-site-password": encodeURIComponent(password) },
+    body: JSON.stringify({ action: "save", rows: data })
+  }).catch(() => {});
+}
+window.addEventListener("pagehide", flushPending);
+document.addEventListener("visibilitychange", () => { if (document.hidden) flushPending(); });
 
 function invalid(f, row) {
   if (f === "platform") return !PLATFORMS.includes(row.platform);
@@ -437,7 +469,7 @@ function render() {
   [...groups.keys()].sort().forEach((k) => {
     const idxs = groups.get(k), first = data[idxs[0]];
     const h = document.createElement("tr"); h.className = "group";
-    h.innerHTML = `<td colspan="8"></td>`;
+    h.innerHTML = `<td colspan="9"></td>`;
     h.firstChild.textContent = `${first.restaurant.trim() || "(no restaurant)"} · ${first.platform || "(no platform)"} · ${niceDate(first.date)} · ${idxs.length} item${idxs.length > 1 ? "s" : ""}`;
     tbody.appendChild(h);
     idxs.forEach((i) => {
@@ -450,6 +482,11 @@ function render() {
           PLATFORMS.forEach((p) => { const o = document.createElement("option"); o.value = o.textContent = p; inp.appendChild(o); });
           inp.value = data[i][f] || "";   // an unknown/empty value leaves it blank and gets flagged on save
           inp.onchange = () => { data[i][f] = inp.value; persist(); render(); };   // regroup under the right platform
+        } else if (f === "popular") {   // tick box: the "Popular" badge on the app
+          td.className = "c";
+          inp = document.createElement("input"); inp.type = "checkbox";
+          inp.checked = data[i][f] === true;
+          inp.onchange = () => { data[i][f] = inp.checked; persist(); };
         } else {
           inp = document.createElement("input");
           inp.value = data[i][f] ?? "";
@@ -475,19 +512,24 @@ const isDup = (a) => data.some((r) =>
   key(r.item) === key(a.item) && numOf(r.sale_price) === numOf(a.sale_price));
 
 $("readBtn").onclick = async () => {
-  const restaurant = chosenRestaurant(), platform = $("platform").value, date = $("date").value, files = [...$("files").files];
+  const restaurant = chosenRestaurant(), choice = $("platform").value, date = $("date").value, files = [...$("files").files];
   if (!restaurant) return setStatus("Choose or type the restaurant first.", "err");
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return setStatus("Pick the date of these prices.", "err");
   if (!files.length) return setStatus("Choose at least one screenshot.", "err");
   $("readBtn").disabled = true;
   let added = 0, dups = 0, unreadable = 0, error = "";
+  const seen = {}, unsure = [], disagree = [];   // what auto-detection found
   try {
     for (let i = 0; i < files.length; i++) {
       setStatus(`Reading ${i + 1} of ${files.length}…`);
       const out = await api("extract", { image: await shrink(files[i]), mediaType: "image/jpeg" });
       unreadable += out.unreadable || 0;
+      const detected = PLATFORMS.includes(out.platform) ? out.platform : "";
+      const platform = choice === "auto" ? detected : choice;   // a platform you pick yourself always wins
+      if (choice === "auto") { if (detected) seen[detected] = (seen[detected] || 0) + 1; else unsure.push(files[i].name); }
+      else if (detected && detected !== choice) disagree.push(`${files[i].name} looks like ${detected}`);
       for (const it of out.items) {
-        const row = { restaurant, platform, date, item: it.item || "", size: it.size || "", sale_price: it.sale_price || "", regular_price: it.regular_price || "", notes: it.notes || "" };
+        const row = { restaurant, platform, date, item: it.item || "", size: it.size || "", sale_price: it.sale_price || "", regular_price: it.regular_price || "", notes: it.notes || "", popular: it.popular === true };
         if (isDup(row)) dups++; else { data.push(row); added++; }
       }
     }
@@ -495,11 +537,14 @@ $("readBtn").onclick = async () => {
   showBad = false; render(); fillRestaurantSelect(); persist();
   $("rest").value = restaurant; $("newRestWrap").hidden = $("rest").value !== NEW;
   const parts = [`Read ${added} item(s).`];
+  if (Object.keys(seen).length) parts.push("Detected " + Object.entries(seen).map(([p, n]) => `${p} (${n} screenshot${n > 1 ? "s" : ""})`).join(", ") + ".");
+  if (unsure.length) parts.push(`⚠ Could not tell which app ${unsure.join(", ")} came from: choose the platform in the table.`);
+  if (disagree.length) parts.push(`⚠ ${disagree.join("; ")}, but you chose ${choice}: check it is the right one.`);
   if (dups) parts.push(`${dups} repeated item(s) from overlapping screenshots were skipped.`);
   if (unreadable) parts.push(`⚠ ${unreadable} card(s) could not be read, so check the screenshot.`);
   if (error) parts.push("Stopped: " + error);
   else parts.push("Check the rows, then save them.");
-  setStatus(parts.join(" "), error || unreadable ? "err" : "ok");
+  setStatus(parts.join(" "), error || unreadable || unsure.length || disagree.length ? "err" : "ok");
   $("readBtn").disabled = false;
 };
 
@@ -511,10 +556,11 @@ $("saveBtn").onclick = async () => {
   $("saveBtn").disabled = true;
   try {
     clearTimeout(saveTimer); saveTimer = null;
+    const justSaved = data;
     const { saved, replaced } = await api("save", { rows: data });
     data = []; showBad = false; render();
     setStatus(`Saved ${saved} price(s).` + (replaced ? ` ${replaced} replaced an earlier entry for the same restaurant, platform, date, size and pizza.` : ""), "ok");
-    await loadHistory();
+    await loadHistoryUntilSeen(justSaved);   // so the new prices and restaurant appear without a reload
   } catch (e) { setStatus(e.message, "err"); }
   $("saveBtn").disabled = false;
 };
