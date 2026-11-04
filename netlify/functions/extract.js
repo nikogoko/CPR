@@ -40,6 +40,8 @@ const PROMPT =
   "First work out which delivery app the screenshot comes from (" + PLATFORMS.join(" or ") + "); if you are not sure, answer unknown rather than guessing. " +
   "Then record EVERY product card visible; there may be 20 or more. " +
   "Products are grouped under headlines (category titles). A screenshot may show several headlines: give every product the headline directly above it. " +
+  "The page may also have a side menu that lists many categories with one entry looking highlighted (darker or bold): that entry is the category currently open. " +
+  "Do not treat the other entries of that side menu as headlines of the products. Use the highlighted entry as the headline only when no title is shown above the products themselves. " +
   "Ignore floating banners or promos that apply to the whole order (for example 'get ₾12 off ₾30 orders'), buttons, and the page description text. " +
   "If a card is partly hidden and its name or price cannot be read, do not guess: skip it and count it in unreadable_cards. " +
   "Never invent values.";
