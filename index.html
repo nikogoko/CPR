@@ -47,8 +47,9 @@
   button:focus-visible, input:focus-visible, select:focus-visible { outline: 3px solid var(--cheese); outline-offset: 2px; }
 
   .topbar { display: flex; flex-wrap: wrap; gap: 12px; justify-content: space-between; align-items: center; margin-bottom: 18px; }
-  .dl { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: flex-end; }
+  .dl { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: flex-end; margin-left: auto; }   /* always on the right, even when it wraps to its own line */
   .dl select { max-width: 280px; }
+  #dlStatus:empty { display: none; }   /* no empty gap beside the button */
   nav { display: flex; flex-wrap: wrap; gap: 8px; }
   nav button { background: var(--paper); color: var(--ink); border: 1.5px solid var(--line); padding: 8px 18px; }
   nav button:not(.active):hover:not(:disabled) { background: #f6e6c4; }
@@ -120,7 +121,7 @@
 
   @media (max-width: 600px) {
     .wrap { padding: 12px; } .card { padding: 14px; } header.brand h1 { font-size: 2rem; }
-    .topbar { justify-content: center; } #restTitle { font-size: 1.5rem; }
+    #restTitle { font-size: 1.5rem; }
     .grid thead th, .grid td { padding: 9px 6px; }
     .grid td:first-child { min-width: 78px; max-width: 105px; }
     .grid td strong { font-size: .95rem; } .grid .note { font-size: .74rem; }
