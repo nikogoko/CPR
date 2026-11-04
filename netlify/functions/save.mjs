@@ -31,7 +31,7 @@ export default async (req) => {
       const sale = num(r.sale_price);
       const regularText = String(r.regular_price ?? "").trim();
       const regular = regularText === "" ? "" : num(regularText);
-      if (!restaurant || !item || !size) return bad(`Row "${item || "?"}" is missing a restaurant, pizza name or size.`);
+      if (!restaurant || !item || !size) return bad(`Row "${item || "?"}" is missing a restaurant, item name or headline.`);
       if (!PLATFORMS.includes(platform)) return bad(`Row "${item}" needs a platform (${PLATFORMS.join(" or ")}).`);
       if (!Number.isFinite(sale)) return bad(`Row "${item}" has no valid sale price.`);
       if (regular !== "" && !Number.isFinite(regular)) return bad(`Row "${item}" has an invalid regular price.`);

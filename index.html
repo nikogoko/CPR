@@ -66,7 +66,7 @@
   td input { width: 100%; padding: 7px 9px; }
   td input.bad, td select.bad { border-color: var(--down); background: #fdecea; }
   #results table { min-width: 880px; }
-  #results td:nth-child(2) { min-width: 88px; } #results td:nth-child(3) { min-width: 130px; } #results td:nth-child(7) { min-width: 120px; }
+  #results td:nth-child(1) { min-width: 96px; } #results td:nth-child(2) { min-width: 84px; } #results td:nth-child(3) { min-width: 120px; } #results td:nth-child(4) { min-width: 130px; } #results td:nth-child(7) { min-width: 110px; }
   #results td, #results th { padding-left: 3px; padding-right: 3px; }
   #results td input[type=text], #results td select { padding: 7px 7px; }
   #results td button { padding: 8px 13px; }
@@ -87,6 +87,8 @@
   .grid tbody tr:nth-child(even) td { background: #fdf7e8; }
   .grid tbody tr:hover td { background: #fbeccb; }
   .grid td strong { font-size: 1.08rem; }
+  .grid.single td:nth-child(2) { white-space: nowrap; }
+  .grid.single .note { font-size: .85rem; }
   .grid s { color: var(--muted); margin-left: 8px; font-size: .9rem; }
   .grid .note { font-size: .8rem; font-weight: 600; color: var(--offer); margin-top: 2px; }
   .chg { margin-left: 8px; font-size: .85rem; font-weight: 700; white-space: nowrap; }
@@ -168,7 +170,7 @@
     <div class="card" id="results" hidden>
       <div class="scroll">
         <table>
-          <thead><tr><th>Restaurant</th><th>Platform</th><th>Pizza</th><th>Size</th><th>Sale price</th><th>Regular price</th><th>Offer</th><th>Popular</th><th></th></tr></thead>
+          <thead><tr><th>Restaurant</th><th>Platform</th><th>Item</th><th>Headline</th><th>Sale price</th><th>Regular price</th><th>Offer</th><th>Popular</th><th></th></tr></thead>
           <tbody id="rows"></tbody>
         </table>
       </div>
@@ -190,11 +192,14 @@
         <label>Date
           <select id="dateSel"></select>
         </label>
+        <label>Headline
+          <select id="headSel"></select>
+        </label>
         <button class="danger" id="delDateBtn">Delete this date</button>
       </div>
       <p id="platEmpty" class="muted" hidden></p>
       <div class="scroll" id="gridWrap"><table class="grid" id="grid"></table></div>
-      <p class="legend" id="legend"><span class="chg up">▲</span> price went up, <span class="chg down">▼</span> price went down, compared with the last earlier date this pizza and size was recorded.</p>
+      <p class="legend" id="legend"><span class="chg up">▲</span> price went up, <span class="chg down">▼</span> price went down, compared with the last earlier date this pizza was recorded under the same headline.</p>
     </div>
   </section>
 </div>
@@ -213,6 +218,7 @@ let history = [];       // saved price history
 let view = "add";       // "add" or a restaurant name
 let chosenDate = {};    // restaurant|platform -> date being shown
 let chosenPlatform = {}; // restaurant -> Glovo / Wolt tab being shown
+let chosenHeadline = {}; // restaurant|platform -> headline being shown (or "__all")
 let showBad = false;
 let saveTimer = null;
 let pickedNew = false;   // true only when the user deliberately chose "New restaurant"
@@ -297,7 +303,7 @@ function renderTabs() {
   const add = (label, v) => {
     const b = document.createElement("button");
     b.textContent = label; b.className = view === v ? "active" : "";
-    b.onclick = () => { view = v; delete chosenPlatform[v]; Object.keys(chosenDate).forEach((k) => { if (k.startsWith(v + "|")) delete chosenDate[k]; }); renderTabs(); showView(); };   // opening a tab always starts on the newest date
+    b.onclick = () => { view = v; delete chosenPlatform[v]; Object.keys(chosenDate).forEach((k) => { if (k.startsWith(v + "|")) delete chosenDate[k]; }); Object.keys(chosenHeadline).forEach((k) => { if (k.startsWith(v + "|")) delete chosenHeadline[k]; }); renderTabs(); showView(); };   // opening a tab always starts on the newest date
     nav.appendChild(b);
   };
   add("➕ Add", "add");
@@ -343,6 +349,34 @@ async function loadHistoryUntilSeen(rows) {
   }
 }
 
+// One headline as its own table: item, price (with change arrow), regular price, offer.
+function renderOneHeadline(grid, rows, before) {
+  grid.className = "grid single";
+  const head = grid.createTHead().insertRow();
+  ["Item", "Price", "Regular price", "Offer"].forEach((h) => { const th = document.createElement("th"); th.textContent = h; head.appendChild(th); });
+  const body = grid.createTBody();
+  const latest = new Map();
+  rows.forEach((r) => latest.set(r.item, r));   // if a day was sent twice, the last one wins; order stays as read
+  for (const r of latest.values()) {
+    const tr = body.insertRow();
+    const nameCell = tr.insertCell(); nameCell.textContent = r.item;
+    if (r.popular) { const t = document.createElement("div"), pill = document.createElement("span"); pill.className = "pop"; pill.textContent = "★ Popular"; t.appendChild(pill); nameCell.appendChild(t); }
+    const priceCell = tr.insertCell(), b = document.createElement("strong"); b.textContent = money(r.sale_price); priceCell.appendChild(b);
+    const old = before.get(r.item + "\u0000" + r.size), diff = old ? numOf(r.sale_price) - numOf(old.sale_price) : 0;
+    if (Math.abs(diff) >= 0.005) {
+      const c = document.createElement("span");
+      c.className = "chg " + (diff > 0 ? "up" : "down");
+      c.textContent = (diff > 0 ? "▲ " : "▼ ") + Math.abs(diff).toFixed(2) + "₾";
+      c.title = `was ${money(old.sale_price)} on ${niceDate(old.date)}`;
+      priceCell.appendChild(c);
+    }
+    const regCell = tr.insertCell();
+    if (r.regular_price !== "" && r.regular_price != null) { const o = document.createElement("s"); o.textContent = money(r.regular_price); regCell.appendChild(o); } else { regCell.textContent = "–"; regCell.className = "muted"; }
+    const offerCell = tr.insertCell();
+    if (r.notes) { const n = document.createElement("div"); n.className = "note"; n.textContent = r.notes; offerCell.appendChild(n); } else { offerCell.textContent = "–"; offerCell.className = "muted"; }
+  }
+}
+
 function renderRestaurant() {
   const name = view;
   const everything = history.filter((r) => r.restaurant === name);
@@ -381,7 +415,7 @@ function renderRestaurant() {
   sel.value = d;
 
   const rows = mine.filter((r) => r.date === d);
-  const sizes = [...new Set(rows.map((r) => r.size))].sort((a, b) => ((parseFloat(a) || 0) - (parseFloat(b) || 0)) || a.localeCompare(b));
+  const sizes = [...new Set(rows.map((r) => r.size))].sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));   // one column per headline; 25 sorts before 33
   const pizzas = [...new Set(rows.map((r) => r.item))];
   const cell = new Map();
   rows.forEach((r) => cell.set(r.item + "\u0000" + r.size, r));   // if a day was sent twice, the last one wins
@@ -390,9 +424,20 @@ function renderRestaurant() {
   mine.filter((r) => r.date < d).sort((a, b) => a.date.localeCompare(b.date))
     .forEach((r) => before.set(r.item + "\u0000" + r.size, r));
 
+  // Headline dropdown: one headline's items (default), or every headline side by side.
+  const ALL = "__all", hKey = name + "|" + plat;
+  if (chosenHeadline[hKey] !== ALL && !sizes.includes(chosenHeadline[hKey])) chosenHeadline[hKey] = sizes[0];
+  const hv = chosenHeadline[hKey];
+  const hs = $("headSel"); hs.innerHTML = "";
+  sizes.forEach((h) => { const o = document.createElement("option"); o.value = h; o.textContent = h; hs.appendChild(o); });
+  const all = document.createElement("option"); all.value = ALL; all.textContent = "All headlines (side by side)"; hs.appendChild(all);
+  hs.value = hv;
+
   const grid = $("grid"); grid.innerHTML = "";
+  if (hv !== ALL) { renderOneHeadline(grid, rows.filter((r) => r.size === hv), before); return; }
+  grid.className = "grid";
   const head = grid.createTHead().insertRow();
-  ["Pizza", ...sizes].forEach((h) => { const th = document.createElement("th"); th.textContent = h; head.appendChild(th); });
+  ["Item", ...sizes].forEach((h) => { const th = document.createElement("th"); th.textContent = h; head.appendChild(th); });
   const body = grid.createTBody();
   pizzas.forEach((p) => {
     const tr = body.insertRow();
@@ -416,6 +461,7 @@ function renderRestaurant() {
   });
 }
 $("dateSel").onchange = () => { chosenDate[view + "|" + chosenPlatform[view]] = $("dateSel").value; renderRestaurant(); };
+$("headSel").onchange = () => { chosenHeadline[view + "|" + chosenPlatform[view]] = $("headSel").value; renderRestaurant(); };
 
 /* ---------- pending rows (shared via the server) ---------- */
 async function loadPending() {
@@ -552,14 +598,14 @@ $("saveBtn").onclick = async () => {
   if (!data.length) return setStatus("Nothing to send.", "err");
   showBad = true; render();
   if (data.some((r) => FIELDS.some((f) => invalid(f, r))))
-    return setStatus("Fix the red cells (restaurant, platform, pizza, size and sale price are required).", "err");
+    return setStatus("Fix the red cells (restaurant, platform, item, headline and sale price are required).", "err");
   $("saveBtn").disabled = true;
   try {
     clearTimeout(saveTimer); saveTimer = null;
     const justSaved = data;
     const { saved, replaced } = await api("save", { rows: data });
     data = []; showBad = false; render();
-    setStatus(`Saved ${saved} price(s).` + (replaced ? ` ${replaced} replaced an earlier entry for the same restaurant, platform, date, size and pizza.` : ""), "ok");
+    setStatus(`Saved ${saved} price(s).` + (replaced ? ` ${replaced} replaced an earlier entry for the same restaurant, platform, date, headline and item.` : ""), "ok");
     await loadHistoryUntilSeen(justSaved);   // so the new prices and restaurant appear without a reload
   } catch (e) { setStatus(e.message, "err"); }
   $("saveBtn").disabled = false;

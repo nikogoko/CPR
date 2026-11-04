@@ -17,13 +17,13 @@ const FORMAT = {
           type: "object",
           properties: {
             item: { type: "string", description: "Product name exactly as written (keep the original script, do not translate)" },
-            size: { type: "string", description: "Size from the category heading, written like '33 cm'. Empty string if no heading is visible." },
+            headline: { type: "string", description: "The headline (menu category title) this product sits directly under, copied exactly as written in its original language, including any size in it, e.g. \"ნეაპოლიტანური პიცა 33 სმ\". Do not translate or shorten it. Empty string if no headline is visible above the product." },
             sale_price: { type: "string", description: "Current price, digits only like 34.00, no currency" },
             regular_price: { type: "string", description: "Struck-through old price, digits only. Empty string if the card has none." },
             notes: { type: "string", description: "Discount or offer line on the card, exactly as written (e.g. '20% discount on selected products'). Do NOT include the Popular badge here. Empty string if none." },
             popular: { type: "boolean", description: "true only if the card shows the 'Popular' badge (in Georgian: პოპულარული), otherwise false" }
           },
-          required: ["item", "size", "sale_price", "regular_price", "notes", "popular"],
+          required: ["item", "headline", "sale_price", "regular_price", "notes", "popular"],
           additionalProperties: false
         }
       },
@@ -38,6 +38,7 @@ const PROMPT =
   "This is a screenshot of one menu category of a restaurant in a food-delivery app (the text may be Georgian). " +
   "First work out which delivery app the screenshot comes from (" + PLATFORMS.join(" or ") + "); if you are not sure, answer unknown rather than guessing. " +
   "Then record EVERY product card visible; there may be 20 or more. " +
+  "Products are grouped under headlines (category titles). A screenshot may show several headlines: give every product the headline directly above it. " +
   "Ignore floating banners or promos that apply to the whole order (for example 'get ₾12 off ₾30 orders'), buttons, and the page description text. " +
   "If a card is partly hidden and its name or price cannot be read, do not guess: skip it and count it in unreadable_cards. " +
   "Never invent values.";
@@ -76,7 +77,7 @@ exports.handler = async (event) => {
     let out;
     try { out = JSON.parse(text); } catch { return fail(502, "Claude's reply could not be understood. Please try again."); }
     const platform = PLATFORMS.includes(out.platform) ? out.platform : "unknown";
-    return { statusCode: 200, body: JSON.stringify({ platform, items: out.items || [], unreadable: out.unreadable_cards || 0 }) };
+    return { statusCode: 200, body: JSON.stringify({ platform, items: (out.items || []).map(({ headline, ...rest }) => ({ ...rest, size: headline })), unreadable: out.unreadable_cards || 0 }) };
   } catch (e) {
     if (e instanceof Anthropic.AuthenticationError)
       return fail(502, "Anthropic rejected the API key. Check ANTHROPIC_API_KEY in Netlify (re-paste it, no spaces) and redeploy.");

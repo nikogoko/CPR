@@ -19,14 +19,14 @@ Push this project to your repository (node_modules is ignored automatically).
 3. Deploy, open the URL, enter your password.
 
 ## Using it
-- Browser zoomed out until the whole menu category shows, take a screenshot (include the size heading, e.g. "33 cm").
+- Browser zoomed out until the whole menu category shows, take a screenshot (include the headline above the pizzas, e.g. "Neapolitan pizza 33 cm"; a screenshot can show several headlines).
 - Add tab -> pick the restaurant (or add a new one) -> leave Platform on Auto-detect (or pick Glovo / Wolt) -> pick the date -> choose screenshots -> Read.
   Glovo and Wolt prices are kept apart, even for the same pizza on the same day.
 - Check the rows (red cells must be filled; tick "Popular" for pizzas the app marks as Popular) -> Save prices.
-- Each restaurant gets its own tab with a Glovo | Wolt switch inside it. It opens on the platform with the freshest prices and its newest date; the dropdown shows older dates.
-  Arrows show price changes since the last earlier date that pizza and size was recorded on the same platform.
+- Each restaurant gets its own tab with a Glovo | Wolt switch inside it, and a Headline dropdown to show one headline at a time (for example "Neapolitan pizza 33 cm", Salads or Beverages) or all of them side by side. It opens on the platform with the freshest prices and its newest date; the dropdown shows older dates.
+  Arrows show price changes since the last earlier date that pizza was recorded under the same headline on the same platform.
 - Download Excel gives a .xlsx with an "All data" sheet (full history, with filters and a Platform column) and one sheet per restaurant with two parts: Glovo on top, Wolt below (newest date of each).
-- Sending the same restaurant + platform + date + size + pizza again replaces the earlier entry (so you can correct a day).
+- Sending the same restaurant + platform + date + headline + pizza again replaces the earlier entry (so you can correct a day).
 - "Delete this date" removes one restaurant + platform + day if a batch was wrong.
 - To add another delivery app later, add its name to lib/platforms.js and to PLATFORMS in index.html.
 - Rows you have read but not saved are kept on the server, so every device that logs in sees them.
