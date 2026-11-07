@@ -5,6 +5,7 @@
   "dependencies": {
     "@anthropic-ai/sdk": "^1.4.0",
     "@netlify/blobs": "^8.1.0",
+    "@simplewebauthn/server": "^14.0.3",
     "exceljs": "^4.4.0"
   }
 }

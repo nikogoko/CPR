@@ -49,6 +49,10 @@
   .topbar { display: flex; flex-wrap: wrap; gap: 12px; justify-content: space-between; align-items: center; margin-bottom: 18px; }
   .dl { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: flex-end; margin-left: auto; }   /* always on the right, even when it wraps to its own line */
   .dl select { max-width: 280px; }
+  .foot { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: center; padding: 6px 0 26px; }
+  button.small { padding: 7px 14px; font-size: .85rem; }
+  #login .or { margin: 4px 0 14px; font-size: .85rem; }
+  #faceBtn { margin-bottom: 4px; }
   #dlStatus:empty { display: none; }   /* no empty gap beside the button */
   nav { display: flex; flex-wrap: wrap; gap: 8px; }
   nav button { background: var(--paper); color: var(--ink); border: 1.5px solid var(--line); padding: 8px 18px; }
@@ -112,6 +116,29 @@
   .seg button.active { background: var(--crust); color: #fff; }
   .seg button.active:hover:not(:disabled) { background: var(--crust-dark); }
 
+  /* price comparison */
+  .cmpTitle { font-family: Georgia, "Times New Roman", serif; font-size: 1.6rem; color: var(--sauce); margin: 0 0 12px; }
+  .pick { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; margin: 0 0 14px; }
+  .pick label { display: inline-flex; align-items: center; gap: 6px; font-weight: 600; cursor: pointer; }
+  .pick input { width: 18px; height: 18px; accent-color: var(--sauce); }
+  .warn { background: #fff6dc; border: 1.5px solid #d89a00; border-radius: 10px; padding: 10px 14px; margin: 0 0 14px; }
+  .warn .linkRow { margin: 4px 0; }
+  .warnmark { color: #b26a00; font-weight: 700; margin-left: 6px; cursor: help; }
+  .cmp td, .cmp th { white-space: nowrap; }
+  .cmp th:first-child, .cmp td:first-child { position: sticky; left: 0; z-index: 1; background: var(--paper); }
+  .cmp thead th:first-child { background: var(--sauce); }
+  .cmp tbody tr:nth-child(even) td:first-child { background: #fdf7e8; }
+  .cmp tbody tr:hover td:first-child { background: #fbeccb; }
+  .cmp td.num { text-align: right; }
+  .cmp tr.avg td { font-weight: 700; border-top: 2px solid var(--line); background: #f8e7bd; }
+  .cmp tr.avg td:first-child { background: #f8e7bd; }
+  .diff { margin-left: 8px; font-weight: 700; font-size: .92rem; }
+  .diff.bad { color: var(--down); } .diff.good { color: var(--up); } .diff.flat { color: var(--muted); }
+  .cmpMore { margin-top: 14px; border-top: 1px dashed var(--line); padding-top: 10px; }
+  .cmpMore summary { cursor: pointer; font-weight: 700; }
+  .cmpMore select { max-width: 260px; }
+  .linkRow { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 6px 0; }
+
   /* login */
   #login { max-width: 380px; margin: 28px auto; text-align: center; }
   #login p { margin: 0 0 16px; color: var(--muted); }
@@ -138,7 +165,9 @@
 </header>
 
 <div class="card" id="login">
-  <p>Enter the password to come on in.</p>
+  <p>Come on in.</p>
+  <button class="secondary" id="faceBtn" hidden>🔓 Sign in with Face ID / fingerprint</button>
+  <p id="faceOr" class="muted or" hidden>or use the password</p>
   <label>Password <input type="password" id="pw"></label>
   <button id="loginBtn">Enter</button>
   <div id="loginMsg" class="err"></div>
@@ -167,7 +196,7 @@
         <label>Platform
           <select id="platform"></select>
         </label>
-        <label>Date of these prices
+        <label>Date (only if it is not today)
           <input type="date" id="date">
         </label>
       </div>
@@ -188,6 +217,7 @@
       <p>
         <button id="saveBtn">Save prices</button>
         <button class="secondary" id="clearBtn">Clear</button>
+      <span id="saveDate" class="muted"></span>
       </p>
     </div>
   </section>
@@ -213,6 +243,64 @@
       <p class="legend" id="legend"><span class="chg up">▲</span> price went up, <span class="chg down">▼</span> price went down, compared with the last earlier date this pizza was recorded under the same headline.</p>
     </div>
   </section>
+
+  <!-- COMPARE TAB -->
+  <section id="compareView" hidden>
+    <div class="card">
+      <h2 class="cmpTitle">Price comparison</h2>
+      <div class="row">
+        <label>Your restaurant
+          <select id="cmpRef"></select>
+        </label>
+        <label>App
+          <select id="cmpPlat"></select>
+        </label>
+        <label>Headline
+          <select id="cmpHead"></select>
+        </label>
+        <label>Prices
+          <select id="cmpBasis">
+            <option value="original">Original (before discounts)</option>
+            <option value="sale">Sale prices (after discounts)</option>
+          </select>
+        </label>
+        <label>Percent of
+          <select id="cmpDen">
+            <option value="theirs">their price</option>
+            <option value="higher">the higher price</option>
+          </select>
+        </label>
+      </div>
+      <div class="pick" id="cmpPick"></div>
+      <div class="warn" id="cmpWarn" hidden></div>
+      <p id="cmpEmpty" class="muted" hidden></p>
+      <div class="scroll" id="cmpWrap"><table class="grid cmp" id="cmpGrid"></table></div>
+      <p class="legend" id="cmpLegend"></p>
+      <details class="cmpMore" id="cmpUnmatched"><summary id="cmpUnmatchedSum"></summary>
+        <p class="muted">These items have no match in your restaurant. If one is the same dish under a different name, pick it: the link is saved and used every time.</p>
+        <div class="scroll"><table class="grid" id="cmpUnTable"></table></div>
+      </details>
+      <details class="cmpMore" id="cmpHeads"><summary id="cmpHeadsSum"></summary>
+        <p class="muted">These headlines have no size in common with yours (for example just "Pizza"), so their items are left out of the table. Pick the headline of yours each one should be compared with. You only do this once. Or mark it "not comparable" to leave it out on purpose.</p>
+        <div class="scroll"><table class="grid" id="cmpHeadTable"></table></div>
+        <div id="cmpHeadSetList"></div>
+      </details>
+      <details class="cmpMore" id="cmpSimilar"><summary id="cmpSimilarSum"></summary>
+        <p class="muted">These were matched automatically because the names are spelled almost the same. If one is a different dish, press "Not the same".</p>
+        <div id="cmpSimilarList"></div>
+      </details>
+      <details class="cmpMore" id="cmpLinked"><summary id="cmpLinkedSum"></summary>
+        <div id="cmpLinkedList"></div>
+      </details>
+    </div>
+  </section>
+
+  <footer class="foot">
+    <button class="secondary small" id="faceOnBtn" hidden>Turn on Face ID on this device</button>
+    <button class="secondary small" id="faceOffBtn" hidden>Turn off Face ID everywhere</button>
+    <button class="secondary small" id="logoutBtn">Log out</button>
+    <span id="faceMsg" class="muted"></span>
+  </footer>
 </div>
 
 </div>
@@ -224,9 +312,12 @@ const PLATFORMS = ["Glovo", "Wolt"];   // keep in sync with lib/platforms.js
 const platformLabel = (p) => p || "No platform";   // older entries saved before platforms existed
 const NEW = "__new";
 let password = sessionStorage.getItem("pw") || "";
+let authToken = sessionStorage.getItem("token") || "";   // session pass from a Face ID sign-in
+// What proves who you are on each request: the session pass if you signed in with Face ID, else the password.
+const authHeaders = () => (authToken ? { "x-session-token": authToken } : { "x-site-password": encodeURIComponent(password) });
 let data = [];          // rows read but not yet sent (shared across devices)
 let history = [];       // saved price history
-let view = "add";       // "add" or a restaurant name
+let view = "add";       // "add", the Compare tab, or a restaurant name
 let chosenDate = {};    // restaurant|platform -> date being shown
 let chosenPlatform = {}; // restaurant -> Glovo / Wolt tab being shown
 let chosenHeadline = {}; // restaurant|platform -> headline being shown (or "__all")
@@ -258,18 +349,20 @@ function niceDate(iso) {
 function setStatus(msg, cls) { $("status").textContent = msg; $("status").className = cls || ""; }
 
 function backToLogin(msg) {
-  password = ""; sessionStorage.removeItem("pw");
+  password = ""; authToken = ""; sessionStorage.removeItem("pw"); sessionStorage.removeItem("token");
   $("app").hidden = true; $("login").hidden = false; $("loginMsg").textContent = msg;
+  refreshFaceUi();
 }
 
 async function api(name, body) {
+  const usedPass = !!authToken;   // decide the message by what THIS request used (two requests can fail at once)
   const res = await fetch(`/.netlify/functions/${name}`, {
     method: "POST",
-    headers: { "content-type": "application/json", "x-site-password": encodeURIComponent(password) },
+    headers: { "content-type": "application/json", ...authHeaders() },
     body: JSON.stringify(body)
   });
   const out = await res.json().catch(() => ({}));
-  if (res.status === 401) { backToLogin("Wrong password. Please try again."); throw new Error("Wrong password"); }
+  if (res.status === 401) { backToLogin(usedPass ? "Your Face ID sign-in has ended. Please sign in again." : "Wrong password. Please try again."); throw new Error("Wrong password"); }
   if (!res.ok) throw new Error(out.error || `Error ${res.status}`);
   return out;
 }
@@ -313,8 +406,8 @@ function shrink(file, max = 1800) {
 
 /* ---------- start-up, tabs ---------- */
 function showApp() {
-  $("login").hidden = true; $("app").hidden = false;
-  $("date").value = today();
+  $("login").hidden = true; $("app").hidden = false; faceMsg(""); refreshFaceUi();
+  updateSaveDate();
   const ps = $("platform");   // "Auto-detect" first, then each app
   if (!ps.options.length) {
     [["auto", `Auto (dark = ${THEME.dark}, light = ${THEME.light})`], ...PLATFORMS.map((p) => [p, p])].forEach(([v, t]) => { const o = document.createElement("option"); o.value = v; o.textContent = t; ps.appendChild(o); });
@@ -324,7 +417,7 @@ function showApp() {
   loadPending(); loadHistory();
 }
 $("loginBtn").onclick = async () => {
-  password = $("pw").value.trim(); $("loginMsg").textContent = ""; $("loginBtn").disabled = true;
+  password = $("pw").value.trim(); authToken = ""; sessionStorage.removeItem("token"); $("loginMsg").textContent = ""; $("loginBtn").disabled = true;
   try { await api("pending", { action: "load" }); sessionStorage.setItem("pw", password); showApp(); }   // check the password before opening the app
   catch (e) { if (e.message !== "Wrong password") $("loginMsg").textContent = e.message; }
   $("loginBtn").disabled = false;
@@ -343,17 +436,19 @@ function renderTabs() {
   };
   add("➕ Add", "add");
   restaurantsSaved().forEach((r) => add(r, r));
+  add("⚖ Compare", COMPARE);
 }
 function showView() {
   $("addView").hidden = view !== "add";
-  $("restView").hidden = view === "add";
-  if (view !== "add") renderRestaurant(); else refreshDownloadScopes();
+  $("restView").hidden = !isRestaurantView();
+  $("compareView").hidden = view !== COMPARE;
+  if (isRestaurantView()) renderRestaurant(); else if (view === COMPARE) openCompare(); else refreshDownloadScopes();
 }
 
 // What the Download button includes: everything, or (on a restaurant tab) just that restaurant, or just the day shown.
 function refreshDownloadScopes() {
   const options = [["all", "Everything"]];
-  if (view !== "add") {
+  if (isRestaurantView()) {
     options.push(["restaurant", `${view}: all dates, both apps`]);
     const plat = chosenPlatform[view], d = chosenDate[view + "|" + plat];
     if (d) options.push(["day", `${view} · ${platformLabel(plat)} · ${niceDate(d)}`]);
@@ -382,7 +477,7 @@ const chosenRestaurant = () => ($("rest").value === NEW ? $("newRest").value.tri
 async function loadHistory() {
   try { history = (await api("history", { action: "read" })).rows; }
   catch (e) { setStatus("Could not load saved prices: " + e.message, "err"); }
-  if (view !== "add" && !restaurantsSaved().includes(view)) view = "add";
+  if (isRestaurantView() && !restaurantsSaved().includes(view)) view = "add";
   renderTabs(); fillRestaurantSelect(); showView();
 }
 
@@ -548,7 +643,7 @@ function flushPending() {
   clearTimeout(saveTimer); saveTimer = null;
   fetch("/.netlify/functions/pending", {
     method: "POST", keepalive: true,
-    headers: { "content-type": "application/json", "x-site-password": encodeURIComponent(password) },
+    headers: { "content-type": "application/json", ...authHeaders() },
     body: JSON.stringify({ action: "save", rows: data })
   }).catch(() => {});
 }
@@ -568,7 +663,7 @@ function render() {
   const tbody = $("rows"); tbody.innerHTML = "";
   const groups = new Map();
   data.forEach((row, i) => {
-    const k = key(row.restaurant) + "|" + (row.platform || "") + "|" + row.date;
+    const k = key(row.restaurant) + "|" + (row.platform || "");
     if (!groups.has(k)) groups.set(k, []);
     groups.get(k).push(i);
   });
@@ -576,7 +671,7 @@ function render() {
     const idxs = groups.get(k), first = data[idxs[0]];
     const h = document.createElement("tr"); h.className = "group";
     h.innerHTML = `<td colspan="11"></td>`;
-    h.firstChild.textContent = `${first.restaurant.trim() || "(no restaurant)"} · ${first.platform || "(no platform)"} · ${niceDate(first.date)} · ${idxs.length} item${idxs.length > 1 ? "s" : ""}`;
+    h.firstChild.textContent = `${first.restaurant.trim() || "(no restaurant)"} · ${first.platform || "(no platform)"} · ${idxs.length} item${idxs.length > 1 ? "s" : ""}`;
     tbody.appendChild(h);
     idxs.forEach((i) => {
       const tr = document.createElement("tr");
@@ -612,10 +707,11 @@ function render() {
     });
   });
   $("results").hidden = !data.length;
+  updateSaveDate();
 }
 
 const isDup = (a) => data.some((r) =>
-  key(r.restaurant) === key(a.restaurant) && r.platform === a.platform && r.date === a.date && key(r.size) === key(a.size) &&
+  key(r.restaurant) === key(a.restaurant) && r.platform === a.platform && key(r.size) === key(a.size) &&
   key(r.item) === key(a.item) && numOf(r.sale_price) === numOf(a.sale_price));
 
 // The app you used last (detected with confidence, or picked by you). Used as a fallback when a
@@ -625,9 +721,8 @@ try { const saved = localStorage.getItem("lastPlatform"); if (PLATFORMS.includes
 function rememberPlatform(p) { lastPlatform = p; try { localStorage.setItem("lastPlatform", p); } catch { /* ignore */ } }
 
 $("readBtn").onclick = async () => {
-  const restaurant = chosenRestaurant(), choice = $("platform").value, date = $("date").value, files = [...$("files").files];
+  const restaurant = chosenRestaurant(), choice = $("platform").value, files = [...$("files").files];
   if (!restaurant) return setStatus("Choose or type the restaurant first.", "err");
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return setStatus("Pick the date of these prices.", "err");
   if (!files.length) return setStatus("Choose at least one screenshot.", "err");
   $("readBtn").disabled = true;
   let added = 0, dups = 0, unreadable = 0, error = "";
@@ -662,7 +757,7 @@ $("readBtn").onclick = async () => {
     } else unsure.push(name);                      // mixed apps in one batch, or no clue at all: leave it blank
     if (guess) (assumed[platform] = assumed[platform] || []).push(name);
     for (const it of out.items) {
-      const row = { restaurant, platform, date, item: it.item || "", size: it.size || "", sale_price: it.sale_price || "", regular_price: it.regular_price || "", notes: it.notes || "", popular: it.popular === true, isNew: it.isNew === true, age18: it.age18 === true };
+      const row = { restaurant, platform, item: it.item || "", size: it.size || "", sale_price: it.sale_price || "", regular_price: it.regular_price || "", notes: it.notes || "", popular: it.popular === true, isNew: it.isNew === true, age18: it.age18 === true };
       if (guess) row.platformAssumed = true;       // shown with a yellow outline until you confirm or change it
       if (isDup(row)) dups++; else { data.push(row); added++; }
     }
@@ -692,16 +787,407 @@ $("saveBtn").onclick = async () => {
   $("saveBtn").disabled = true;
   try {
     clearTimeout(saveTimer); saveTimer = null;
-    const justSaved = data;
-    const { saved, replaced } = await api("save", { rows: data });
+    const day = chosenDay();   // decided now, at the click: the date you picked, otherwise today
+    const justSaved = data.map((r) => ({ ...r, date: day }));
+    const { saved, replaced } = await api("save", { rows: justSaved });
     data = []; showBad = false; render();
-    setStatus(`Saved ${saved} price(s).` + (replaced ? ` ${replaced} replaced an earlier entry for the same restaurant, platform, date, headline and item.` : ""), "ok");
+    setStatus(`Saved ${saved} price(s) for ${niceDate(day)}.` + (replaced ? ` ${replaced} replaced an earlier entry for the same restaurant, platform, date, headline and item.` : ""), "ok");
     await loadHistoryUntilSeen(justSaved);   // so the new prices and restaurant appear without a reload
   } catch (e) { setStatus(e.message, "err"); }
   $("saveBtn").disabled = false;
 };
 
 $("clearBtn").onclick = () => { data = []; showBad = false; render(); persist(); setStatus(""); };
+
+/* ---------- Compare restaurants ---------- */
+const COMPARE = "⚖ compare";   // the id of the Compare tab (not a restaurant)
+const isRestaurantView = () => view !== "add" && view !== COMPARE;
+let links = {};            // competitor item -> your item, saved on the server
+let linksLoaded = false;
+const cmp = { ref: "", platform: "", headline: "", basis: "original", den: "theirs" };
+// Restaurants you un-ticked in "Compare with", remembered on this device for each "your restaurant".
+let skipBy = {};
+try { skipBy = JSON.parse(localStorage.getItem("cmpSkip") || "{}") || {}; } catch { /* no memory: everything ticked */ }
+const skipped = () => new Set(skipBy[cmp.ref] || []);
+function setSkipped(set) { skipBy[cmp.ref] = [...set]; try { localStorage.setItem("cmpSkip", JSON.stringify(skipBy)); } catch { /* ignore */ } }
+
+// Same dish, ignoring capitals, spaces and punctuation.
+const norm = (s) => String(s ?? "").normalize("NFKC").toLowerCase().replace(/[^\p{L}\p{N}]+/gu, "");
+// What size a headline means. A number wins ("Pizza 25 cm" -> 25), except for sizes listed as the same below.
+// Without a number the wording decides: a plain "Pizza" is the normal size and a "Small pizza" the small size.
+// "Large", "Medium" and the like are not guessed, so they stay unmatched until you link them.
+// To change any of this, change the numbers, SAME_SIZE or the word lists.
+const NORMAL_SIZE = "33", SMALL_SIZE = "20";
+const SAME_SIZE = { "30": "33", "35": "33" };   // "30 cm" and "35 cm" count as 33
+const SMALL_WORDS = ["small", "mini", "little", "პატარა"];
+const NORMAL_WORDS = ["normal", "regular", "standard"];
+const LARGE_WORDS = ["large", "big", "xl", "family", "giant", "medium", "დიდი", "საშუალო"];
+const PIZZA_WORDS = ["pizza", "pizzas", "piza", "pitsa", "პიცა"];
+function sizeInfo(h) {
+  const m = String(h ?? "").match(/\d+(?:[.,]\d+)?/);
+  if (m) { const n = m[0].replace(",", "."); return SAME_SIZE[n] ? { key: SAME_SIZE[n], how: "number", aliased: true } : { key: n, how: "number" }; }
+  const words = String(h ?? "").normalize("NFKC").toLowerCase().split(/[^\p{L}\p{N}]+/u).filter(Boolean);
+  const has = (list) => words.some((w) => list.includes(w));
+  if (has(LARGE_WORDS)) return { key: norm(h), how: "text" };                       // not told what these mean: do not guess
+  if (has(SMALL_WORDS)) return { key: SMALL_SIZE, how: "word" };
+  if (has(NORMAL_WORDS) || has(PIZZA_WORDS)) return { key: NORMAL_SIZE, how: "word" };
+  return { key: norm(h), how: "text" };                                              // anything else is compared as plain text
+}
+const sizeKey = (h) => sizeInfo(h).key;
+// Same dish, even if spelled differently or written in another script: Margherita / Margarite / მარგარიტა all give "mrgrt".
+// Georgian letters become Latin ones, spelling variants are folded together, then vowels and doubled letters are dropped.
+const GEO = { "ა": "a", "ბ": "b", "გ": "g", "დ": "d", "ე": "e", "ვ": "v", "ზ": "z", "თ": "t", "ი": "i", "კ": "k", "ლ": "l", "მ": "m", "ნ": "n", "ო": "o", "პ": "p", "ჟ": "z", "რ": "r", "ს": "s", "ტ": "t", "უ": "u", "ფ": "f", "ქ": "k", "ღ": "g", "ყ": "k", "შ": "s", "ჩ": "k", "ც": "k", "ძ": "z", "წ": "k", "ჭ": "k", "ხ": "h", "ჯ": "j", "ჰ": "h" };
+const FILLER_WORDS = new Set(["pizza", "piza", "pitsa", "პიცა"]);   // "Pepperoni pizza" is "Pepperoni"
+function nameKey(name) {
+  const words = String(name ?? "").normalize("NFKD").replace(/[\u0300-\u036f]/g, "").toLowerCase().split(/[^\p{L}\p{N}]+/u).filter((w) => w && !FILLER_WORDS.has(w));
+  const latin = words.join("").replace(/[\u10d0-\u10f0]/g, (c) => GEO[c] || "")
+    .replace(/ph/g, "f").replace(/gh/g, "g").replace(/ck/g, "k").replace(/[cq]/g, "k").replace(/w/g, "v").replace(/y/g, "i").replace(/x/g, "ks")
+    .replace(/kh/g, "k").replace(/sh/g, "s").replace(/zh/g, "z").replace(/th/g, "t").replace(/z/g, "s");
+  const skeleton = latin.replace(/[aeiou]/g, "").replace(/(.)\1+/g, "$1");
+  return skeleton.length >= 3 ? skeleton : latin.replace(/(.)\1+/g, "$1");   // very short names keep their vowels, so "Ai" and "Oi" stay different
+}
+const naturalSort = (a, b) => a.localeCompare(b, undefined, { numeric: true });
+
+// Headline links share the same saved list as item links; their key starts with "~" (item names never contain it).
+const headLinkOf = (comp, headline) => { const l = links[norm(comp) + "|~" + norm(headline)]; return l && l.ref === norm(cmp.ref) ? l.item : null; };
+// The size a competitor's row counts as: your choice for its headline, else the number in the headline. "!" = left out on purpose.
+function compSize(comp, row) {
+  const h = headLinkOf(comp, row.size);
+  if (h === "!") return "!" + norm(row.size);
+  return h || sizeKey(row.size);
+}
+
+function newestRows(restaurant, platform) {   // the most recent day saved for this restaurant on this app
+  const mine = history.filter((r) => r.restaurant === restaurant && (r.platform || "") === platform);
+  const date = mine.map((r) => r.date).sort().pop();
+  return { date, rows: mine.filter((r) => r.date === date) };
+}
+function comparePrice(r) {   // original price if it has one and "original" is chosen, else the price customers pay
+  const sale = numOf(r.sale_price), original = numOf(r.regular_price);
+  return cmp.basis === "original" && Number.isFinite(original) ? original : sale;
+}
+// + means your restaurant costs MORE than theirs, - means less.
+function diffPercent(mine, theirs) {
+  if (!(mine >= 0) || !(theirs > 0)) return NaN;
+  const base = cmp.den === "higher" ? Math.max(mine, theirs) : theirs;
+  return Math.round(((mine - theirs) / base) * 100);
+}
+function diffTag(d) {
+  const s = document.createElement("span");
+  s.className = "diff " + (d > 0 ? "bad" : d < 0 ? "good" : "flat");
+  s.textContent = (d > 0 ? "+" : d < 0 ? "−" : "") + Math.abs(d) + "%";
+  return s;
+}
+function addOption(sel, value, text) { const o = document.createElement("option"); o.value = value; o.textContent = text; sel.appendChild(o); }
+
+async function openCompare() {
+  refreshDownloadScopes();
+  renderCompare();
+  if (!linksLoaded) {
+    try { links = (await api("links", { action: "load" })).links || {}; linksLoaded = true; renderCompare(); }
+    catch { /* matching by name still works without saved links */ }
+  }
+}
+
+function renderCompare() {
+  if (view !== COMPARE) return;
+  const ALL = "__all", names = restaurantsSaved();
+  const stop = (msg) => { $("cmpEmpty").textContent = msg; $("cmpEmpty").hidden = false; ["cmpWrap", "cmpLegend", "cmpUnmatched", "cmpHeads", "cmpSimilar", "cmpLinked", "cmpWarn"].forEach((id) => { $(id).hidden = true; }); };
+  ["cmpPlat", "cmpHead"].forEach((id) => { $(id).innerHTML = ""; });
+  $("cmpRef").innerHTML = ""; $("cmpPick").innerHTML = "";
+  if (names.length < 2) { names.forEach((n) => addOption($("cmpRef"), n, n)); return stop("Save prices for at least two restaurants to compare them."); }
+
+  // Your restaurant (Gennaro if there is one), the app, the headline.
+  if (!names.includes(cmp.ref)) cmp.ref = names.find((n) => key(n) === "gennaro") || names[0];
+  names.forEach((n) => addOption($("cmpRef"), n, n)); $("cmpRef").value = cmp.ref;
+  const plats = PLATFORMS.filter((p) => history.some((r) => r.restaurant === cmp.ref && (r.platform || "") === p));
+  if (!plats.length) return stop(`No saved prices for ${cmp.ref} on Glovo or Wolt yet.`);
+  if (!plats.includes(cmp.platform)) cmp.platform = plats[0];
+  plats.forEach((p) => addOption($("cmpPlat"), p, p)); $("cmpPlat").value = cmp.platform;
+  $("cmpBasis").value = cmp.basis; $("cmpDen").value = cmp.den;
+
+  // "Compare with": tick the restaurants to include.
+  const others = names.filter((n) => n !== cmp.ref), off = skipped(), pick = $("cmpPick");
+  const title = document.createElement("strong"); title.textContent = "Compare with:"; pick.appendChild(title);
+  others.forEach((n) => {
+    const l = document.createElement("label"), c = document.createElement("input"); c.type = "checkbox"; c.checked = !off.has(n);
+    c.onchange = () => { const now = skipped(); if (c.checked) now.delete(n); else now.add(n); setSkipped(now); renderCompare(); };
+    l.appendChild(c); l.appendChild(document.createTextNode(n + (history.some((r) => r.restaurant === n && (r.platform || "") === cmp.platform) ? "" : ` (none on ${cmp.platform})`))); pick.appendChild(l);
+  });
+  [["All", () => new Set()], ["None", () => new Set(others)]].forEach(([text, make]) => {
+    const b = document.createElement("button"); b.className = "secondary small"; b.textContent = text; b.onclick = () => { setSkipped(make()); renderCompare(); }; pick.appendChild(b);
+  });
+
+  const ref = newestRows(cmp.ref, cmp.platform);
+  const heads = [...new Set(ref.rows.map((r) => r.size))].sort(naturalSort);
+  if (cmp.headline !== ALL && !heads.includes(cmp.headline)) cmp.headline = heads[0];
+  heads.forEach((h) => addOption($("cmpHead"), h, h)); addOption($("cmpHead"), ALL, "All headlines"); $("cmpHead").value = cmp.headline;
+  const group = cmp.headline === ALL ? ref.rows : ref.rows.filter((r) => r.size === cmp.headline);
+  const groupSizes = new Set(group.map((r) => sizeKey(r.size)));
+  const refKey = (r) => sizeKey(r.size) + "|" + nameKey(r.item);
+  const refByKey = new Map(); group.forEach((r) => refByKey.set(refKey(r), r));
+
+  // Every other restaurant's current prices, matched to yours by name + size (or by a link you saved).
+  const refNorm = norm(cmp.ref);
+  const linkOf = (comp, row) => { const l = links[norm(comp) + "|" + norm(row.item)]; return l && l.ref === refNorm ? l.item : null; };
+  const comps = others.filter((n) => !off.has(n)).map((name) => {
+    const cur = newestRows(name, cmp.platform);
+    // A saved link wins; "!" means "never the same dish"; otherwise match by spelling-tolerant name + size.
+    const keyOf = (row) => { const l = linkOf(name, row); return l === "!" ? "!" + norm(row.item) : compSize(name, row) + "|" + (l || nameKey(row.item)); };
+    // If several of their items point at the same one of yours, the best match wins:
+    // a link you made by hand (3), then the exact same name (2), then only a similar spelling (1).
+    const best = new Map(), unmatched = [], conflicts = [];
+    cur.rows.forEach((row) => {
+      if (!groupSizes.has(compSize(name, row))) return;
+      const k = keyOf(row), mine = refByKey.get(k), l = linkOf(name, row);
+      if (!mine) { unmatched.push(row); return; }
+      const rank = l && l !== "!" ? 3 : norm(row.item) === norm(mine.item) ? 2 : 1, held = best.get(k);
+      if (!held) best.set(k, { row, mine, rank, linked: !!(l && l !== "!") });
+      else if (rank > held.rank) {   // a better match takes the place
+        if (rank === 3 && held.rank === 2) conflicts.push({ used: row, ignored: held.row, mine, k });   // hand link beat an exact name: warn
+        unmatched.push(held.row); best.set(k, { row, mine, rank, linked: !!(l && l !== "!") });
+      } else {                       // an equal or better one is already there
+        if (rank === 2 && held.rank === 3) conflicts.push({ used: held.row, ignored: row, mine, k });
+        unmatched.push(row);
+      }
+    });
+    const matches = new Map(), linked = [], similar = [];
+    best.forEach((m, k) => {
+      matches.set(k, m.row);
+      if (m.linked) linked.push(m.row); else if (m.rank === 1) similar.push({ row: m.row, mine: m.mine });
+    });
+    return { name, date: cur.date, rows: cur.rows, matches, unmatched, linked, similar, conflicts };
+  }).filter((c) => c.rows.length);
+  if (!comps.length) return stop(others.every((n) => off.has(n)) ? "Tick at least one restaurant under \"Compare with\"." : `No ticked restaurant has saved prices on ${cmp.platform} yet.`);
+
+  // Headlines of theirs that match none of yours (their items would otherwise vanish without a trace).
+  const allRefSizes = new Set(ref.rows.map((r) => sizeKey(r.size)));
+  const refHeads = [...new Map(ref.rows.map((r) => [sizeKey(r.size), r.size])).entries()];   // size key -> your headline
+  const loose = [], setByHand = [];
+  comps.forEach((c) => {
+    const count = new Map(); c.rows.forEach((row) => count.set(row.size, (count.get(row.size) || 0) + 1));
+    count.forEach((n, headline) => {
+      const l = headLinkOf(c.name, headline);
+      if (l) setByHand.push({ comp: c.name, headline, target: l });
+      else if (!allRefSizes.has(sizeKey(headline))) loose.push({ comp: c.name, headline, n });
+    });
+  });
+  // Sizes assumed from the wording, or counted as another size (30 -> 33), listed under the table so you can see it.
+  const worded = [];
+  comps.forEach((c) => {
+    const seen = new Set();
+    c.rows.forEach((row) => {
+      const info = sizeInfo(row.size);
+      if ((info.how === "word" || info.aliased) && !headLinkOf(c.name, row.size) && allRefSizes.has(info.key) && !seen.has(row.size)) { seen.add(row.size); worded.push(`${c.name} "${row.size}" = ${info.key}`); }
+    });
+  });
+  const cols = comps.filter((c) => c.matches.size);
+  const rows = group.filter((r, i) => group.findIndex((x) => refKey(x) === refKey(r)) === i && cols.some((c) => c.matches.has(refKey(r))));
+  $("cmpEmpty").hidden = !!rows.length;
+  if (!rows.length) $("cmpEmpty").textContent = "No items match yet. Items match when the name and size are the same in both restaurants; use the list below to link the ones named differently.";
+  $("cmpWrap").hidden = $("cmpLegend").hidden = !rows.length;
+
+  // The table: your price, then each restaurant's price with the difference.
+  const grid = $("cmpGrid"); grid.innerHTML = "";
+  const head = grid.createTHead().insertRow();
+  ["Item", cmp.ref, ...cols.map((c) => c.name)].forEach((h) => { const th = document.createElement("th"); th.textContent = h; head.appendChild(th); });
+  const body = grid.createTBody(), sums = cols.map(() => []);
+  rows.forEach((r) => {
+    const tr = body.insertRow(), mine = comparePrice(r);
+    tr.insertCell().textContent = r.item;
+    const mc = tr.insertCell(); mc.className = "num"; const b = document.createElement("strong"); b.textContent = money(mine); mc.appendChild(b);
+    cols.forEach((c, i) => {
+      const td = tr.insertCell(), m = c.matches.get(refKey(r));
+      if (!m) { td.textContent = "–"; td.className = "muted num"; return; }
+      td.className = "num";
+      const theirs = comparePrice(m), s = document.createElement("span"); s.textContent = money(theirs); td.appendChild(s);
+      const d = diffPercent(mine, theirs);
+      if (!Number.isNaN(d)) { td.appendChild(diffTag(d)); sums[i].push(d); }
+      const clash = c.conflicts.find((x) => x.k === refKey(r));
+      if (clash) {   // a hand link was used although the exact name exists: say so right in the cell
+        const w = document.createElement("span"); w.className = "warnmark"; w.textContent = "⚠";
+        w.title = `Linked by hand: "${m.item}" is used. ${c.name} also has "${clash.ignored.item}" (${money(comparePrice(clash.ignored))}), which is not used.`; td.appendChild(w);
+      } else if (linkOf(c.name, m)) td.title = `Linked by hand: ${m.item}`;
+      else if (norm(m.item) !== norm(r.item)) {   // matched by a similar spelling: say so
+        const mark = document.createElement("span"); mark.className = "muted"; mark.textContent = " ≈"; mark.title = `Matched by similar name: "${m.item}"`; td.appendChild(mark);
+      }
+    });
+  });
+  const avg = body.insertRow(); avg.className = "avg"; avg.insertCell().textContent = "Average difference"; avg.insertCell();
+  sums.forEach((list) => { const td = avg.insertCell(); td.className = "num"; if (list.length) td.appendChild(diffTag(Math.round(list.reduce((a, x) => a + x, 0) / list.length))); else td.textContent = "–"; });
+
+  const basisText = cmp.basis === "original" ? "original prices, before discounts" : "sale prices, after discounts";
+  const stale = comps.filter((c) => c.date && c.date !== ref.date).map((c) => `${c.name} (${niceDate(c.date)})`);
+  $("cmpLegend").textContent =
+    `+ (red): ${cmp.ref} costs more than them. − (green): ${cmp.ref} costs less. Compared on ${basisText}, as a percent of ${cmp.den === "higher" ? "the higher price" : "their price"}. ` +
+    (comps.some((c) => c.similar.length) ? "≈ = matched by a similar spelling. " : "") +
+    `Prices as of ${niceDate(ref.date)} for ${cmp.ref}` + (stale.length ? `; older for ${stale.join(", ")}.` : ", and the same day for the others.") +
+    (worded.length ? ` Sizes assumed: ${worded.join(", ")} (a plain "Pizza" counts as ${NORMAL_SIZE}, a small pizza as ${SMALL_SIZE}${Object.entries(SAME_SIZE).map(([a, b]) => `, ${a} cm as ${b}`).join("")}).` : "") +
+    (loose.length ? ` ${new Set(loose.map((x) => x.comp)).size} restaurant(s) have headlines that do not match yours: their items are left out until you link them (see below).` : "") +
+    (comps.length > cols.length ? ` No matching items: ${comps.filter((c) => !c.matches.size).map((c) => c.name).join(", ")}.` : "");
+
+  // Items with no match: pick the same dish in your list, once, and it is remembered.
+  const mine = [...new Map(group.map((r) => [nameKey(r.item), r.item])).entries()];
+  const unmatched = comps.flatMap((c) => c.unmatched.map((row) => ({ comp: c.name, row })));
+  $("cmpUnmatched").hidden = !unmatched.length;
+  $("cmpUnmatchedSum").textContent = `Not matched yet (${unmatched.length})`;
+  const ut = $("cmpUnTable"); ut.innerHTML = "";
+  const uh = ut.createTHead().insertRow(); ["Restaurant", "Item", "Price", `Same as which of ${cmp.ref}'s items?`].forEach((h) => { const th = document.createElement("th"); th.textContent = h; uh.appendChild(th); });
+  const ub = ut.createTBody();
+  unmatched.forEach(({ comp, row }) => {
+    const tr = ub.insertRow(); tr.insertCell().textContent = comp; tr.insertCell().textContent = row.item; tr.insertCell().textContent = money(comparePrice(row));
+    const sel = document.createElement("select"); addOption(sel, "", "— not the same —"); mine.forEach(([n, label]) => addOption(sel, n, label));
+    sel.onchange = () => saveLink(comp, row.item, sel.value);
+    tr.insertCell().appendChild(sel);
+  });
+  $("cmpHeads").hidden = !loose.length && !setByHand.length;
+  $("cmpHeadsSum").textContent = `Headlines that do not match yours (${loose.length})` + (setByHand.length ? ` · set by hand (${setByHand.length})` : "");
+  const ht = $("cmpHeadTable"); ht.innerHTML = "";
+  const hh = ht.createTHead().insertRow(); ["Restaurant", "Their headline", "Items", `Same as which of ${cmp.ref}'s headlines?`].forEach((h) => { const th = document.createElement("th"); th.textContent = h; hh.appendChild(th); });
+  const hb = ht.createTBody();
+  loose.forEach(({ comp, headline, n }) => {
+    const tr = hb.insertRow(); tr.insertCell().textContent = comp; tr.insertCell().textContent = headline; tr.insertCell().textContent = n;
+    const sel = document.createElement("select"); addOption(sel, "?", "— choose —"); addOption(sel, "!", "Not comparable (leave out)"); refHeads.forEach(([k, label]) => addOption(sel, k, label));
+    sel.onchange = () => { if (sel.value !== "?") saveHeadLink(comp, headline, sel.value); };
+    tr.insertCell().appendChild(sel);
+  });
+  const setList = $("cmpHeadSetList"); setList.innerHTML = "";
+  setByHand.forEach(({ comp, headline, target }) => {
+    const box = document.createElement("div"); box.className = "linkRow";
+    const to = target === "!" ? "left out on purpose" : "compared with " + ((refHeads.find(([k]) => k === target) || [])[1] || `size ${target}`);
+    const text = document.createElement("span"); text.textContent = `${comp} · "${headline}" → ${to}`; box.appendChild(text);
+    const x = document.createElement("button"); x.className = "secondary small"; x.textContent = target === "!" ? "Undo" : "Unlink"; x.onclick = () => saveHeadLink(comp, headline, ""); box.appendChild(x);
+    setList.appendChild(box);
+  });
+
+  const clashes = comps.flatMap((c) => c.conflicts.map((x) => ({ comp: c.name, ...x })));
+  const warn = $("cmpWarn"); warn.innerHTML = ""; warn.hidden = !clashes.length;
+  clashes.forEach(({ comp, used, ignored, mine }) => {
+    const box = document.createElement("div"); box.className = "linkRow";
+    const text = document.createElement("span");
+    text.textContent = `⚠ ${comp}: your link uses "${used.item}" (${money(comparePrice(used))}) for ${mine.item}, but ${comp} also has an item named exactly "${ignored.item}" (${money(comparePrice(ignored))}). The exact one is not used.`;
+    box.appendChild(text);
+    const x = document.createElement("button"); x.className = "secondary small"; x.textContent = "Use the exact name instead"; x.onclick = () => saveLink(comp, used.item, ""); box.appendChild(x);
+    warn.appendChild(box);
+  });
+  const sim = comps.flatMap((c) => c.similar.map(({ row, mine }) => ({ comp: c.name, row, mine })));
+  $("cmpSimilar").hidden = !sim.length;
+  $("cmpSimilarSum").textContent = `Matched by similar name (${sim.length})`;
+  const simList = $("cmpSimilarList"); simList.innerHTML = "";
+  sim.forEach(({ comp, row, mine }) => {
+    const box = document.createElement("div"); box.className = "linkRow";
+    const text = document.createElement("span"); text.textContent = `${comp} · "${row.item}"  ≈  "${mine.item}"`; box.appendChild(text);
+    const x = document.createElement("button"); x.className = "secondary small"; x.textContent = "Not the same"; x.onclick = () => saveLink(comp, row.item, "!"); box.appendChild(x);
+    simList.appendChild(box);
+  });
+  const done = comps.flatMap((c) => c.linked.map((row) => ({ comp: c.name, row })));
+  $("cmpLinked").hidden = !done.length;
+  $("cmpLinkedSum").textContent = `Linked by hand (${done.length})`;
+  const list = $("cmpLinkedList"); list.innerHTML = "";
+  done.forEach(({ comp, row }) => {
+    const target = group.find((r) => nameKey(r.item) === linkOf(comp, row)), box = document.createElement("div"); box.className = "linkRow";
+    const text = document.createElement("span"); text.textContent = `${comp} · ${row.item}  →  ${target ? target.item : "?"}`; box.appendChild(text);
+    const x = document.createElement("button"); x.className = "secondary small"; x.textContent = "Unlink"; x.onclick = () => saveLink(comp, row.item, ""); box.appendChild(x);
+    list.appendChild(box);
+  });
+}
+
+async function saveHeadLink(comp, headline, target) {   // headline links live in the same saved list, under a "~" key
+  try { links = (await api("links", { action: "set", comp: norm(comp), item: "~" + norm(headline), ref: norm(cmp.ref), target })).links || {}; renderCompare(); }
+  catch (e) { alert(e.message); renderCompare(); }
+}
+async function saveLink(comp, item, target) {
+  try { links = (await api("links", { action: "set", comp: norm(comp), item: norm(item), ref: norm(cmp.ref), target })).links || {}; renderCompare(); }
+  catch (e) { alert(e.message); renderCompare(); }
+}
+["cmpRef", "cmpPlat", "cmpHead", "cmpBasis", "cmpDen"].forEach((id) => {
+  $(id).onchange = () => {
+    const v = $(id).value;
+    if (id === "cmpRef") { cmp.ref = v; cmp.platform = ""; cmp.headline = ""; }
+    else if (id === "cmpPlat") { cmp.platform = v; cmp.headline = ""; }
+    else if (id === "cmpHead") cmp.headline = v;
+    else if (id === "cmpBasis") cmp.basis = v;
+    else cmp.den = v;
+    renderCompare();
+  };
+});
+
+/* ---------- Face ID / fingerprint sign-in (optional; the password always works) ---------- */
+const canPasskey = () => !!(window.PublicKeyCredential && navigator.credentials);
+const b64u = {
+  toBuf(s) { s = s.replace(/-/g, "+").replace(/_/g, "/"); s += "=".repeat((4 - (s.length % 4)) % 4); return Uint8Array.from(atob(s), (c) => c.charCodeAt(0)).buffer; },
+  fromBuf(buf) { let s = ""; new Uint8Array(buf).forEach((b) => { s += String.fromCharCode(b); }); return btoa(s).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, ""); }
+};
+const creationOptions = (o) => ({ ...o, challenge: b64u.toBuf(o.challenge), user: { ...o.user, id: b64u.toBuf(o.user.id) }, excludeCredentials: (o.excludeCredentials || []).map((c) => ({ ...c, id: b64u.toBuf(c.id) })) });
+const requestOptions = (o) => ({ ...o, challenge: b64u.toBuf(o.challenge), allowCredentials: (o.allowCredentials || []).map((c) => ({ ...c, id: b64u.toBuf(c.id) })) });
+const attestationJSON = (c) => ({ id: c.id, rawId: b64u.fromBuf(c.rawId), type: c.type, authenticatorAttachment: c.authenticatorAttachment, clientExtensionResults: c.getClientExtensionResults(),
+  response: { clientDataJSON: b64u.fromBuf(c.response.clientDataJSON), attestationObject: b64u.fromBuf(c.response.attestationObject), transports: c.response.getTransports ? c.response.getTransports() : [] } });
+const assertionJSON = (c) => ({ id: c.id, rawId: b64u.fromBuf(c.rawId), type: c.type, authenticatorAttachment: c.authenticatorAttachment, clientExtensionResults: c.getClientExtensionResults(),
+  response: { clientDataJSON: b64u.fromBuf(c.response.clientDataJSON), authenticatorData: b64u.fromBuf(c.response.authenticatorData), signature: b64u.fromBuf(c.response.signature), userHandle: c.response.userHandle ? b64u.fromBuf(c.response.userHandle) : undefined } });
+
+async function passkeyCall(body, signedIn) {   // signedIn: also send the password / session pass
+  const res = await fetch("/.netlify/functions/passkey", { method: "POST", headers: { "content-type": "application/json", ...(signedIn ? authHeaders() : {}) }, body: JSON.stringify(body) });
+  const out = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(out.error || `Error ${res.status}`);
+  return out;
+}
+// The day prices are saved under: the date box if you filled it in, otherwise today, read at the moment you press Save.
+const chosenDay = () => (/^\d{4}-\d{2}-\d{2}$/.test($("date").value) ? $("date").value : today());
+function updateSaveDate() {
+  const picked = /^\d{4}-\d{2}-\d{2}$/.test($("date").value);
+  $("saveDate").textContent = picked ? `Will be saved as ${niceDate($("date").value)}.` : `Will be saved with today's date (${niceDate(today())}).`;
+}
+$("date").oninput = updateSaveDate;
+document.addEventListener("visibilitychange", () => { if (!document.hidden) updateSaveDate(); });   // a page left open overnight shows the right day
+
+const thisDeviceHasFaceId = () => { try { return localStorage.getItem("faceThisDevice") === "1"; } catch { return false; } };
+const faceMsg = (text, cls) => { $("faceMsg").textContent = text; $("faceMsg").className = cls || "muted"; };
+
+// Show the Face ID buttons only where they make sense.
+async function refreshFaceUi() {
+  const supported = canPasskey();
+  let enabled = false;
+  if (supported) { try { enabled = (await passkeyCall({ action: "status" })).enabled; } catch { /* server not reachable: leave Face ID hidden */ } }
+  $("faceBtn").hidden = $("faceOr").hidden = !(supported && enabled);          // login screen
+  $("faceOnBtn").hidden = !supported || (enabled && thisDeviceHasFaceId());     // footer
+  $("faceOffBtn").hidden = !enabled;
+}
+
+$("faceBtn").onclick = async () => {
+  $("loginMsg").textContent = ""; $("faceBtn").disabled = true;
+  try {
+    const options = await passkeyCall({ action: "loginOptions" });
+    const cred = await navigator.credentials.get({ publicKey: requestOptions(options) });
+    const { token } = await passkeyCall({ action: "loginVerify", response: assertionJSON(cred) });
+    authToken = token; password = ""; sessionStorage.setItem("token", token); sessionStorage.removeItem("pw");
+    showApp();
+  } catch (e) { $("loginMsg").textContent = e.name === "NotAllowedError" ? "Face ID was cancelled. You can use the password instead." : e.message; }
+  $("faceBtn").disabled = false;
+};
+
+$("faceOnBtn").onclick = async () => {
+  faceMsg("Waiting for Face ID…"); $("faceOnBtn").disabled = true;
+  try {
+    const options = await passkeyCall({ action: "registerOptions" }, true);
+    const cred = await navigator.credentials.create({ publicKey: creationOptions(options) });
+    await passkeyCall({ action: "registerVerify", response: attestationJSON(cred) }, true);
+    try { localStorage.setItem("faceThisDevice", "1"); } catch { /* ignore */ }
+    faceMsg("Face ID is on for this device. Next time you can sign in with it.", "ok");
+  } catch (e) {
+    if (e.name === "InvalidStateError") { try { localStorage.setItem("faceThisDevice", "1"); } catch { /* ignore */ } faceMsg("This device already has Face ID turned on.", "ok"); }
+    else faceMsg(e.name === "NotAllowedError" ? "Cancelled. Nothing was changed." : e.message, "err");
+  }
+  $("faceOnBtn").disabled = false; refreshFaceUi();
+};
+
+$("faceOffBtn").onclick = async () => {
+  if (!confirm("Turn off Face ID on every device? You will use the password until you turn it on again.")) return;
+  try { await passkeyCall({ action: "removeAll" }, true); try { localStorage.removeItem("faceThisDevice"); } catch { /* ignore */ } faceMsg("Face ID is off on every device.", "ok"); }
+  catch (e) { faceMsg(e.message, "err"); }
+  refreshFaceUi();
+};
+
+$("logoutBtn").onclick = () => backToLogin("You are logged out.");
 
 $("delDateBtn").onclick = async () => {
   const name = view, plat = chosenPlatform[name], dKey = name + "|" + plat, d = chosenDate[dKey];
@@ -736,7 +1222,7 @@ $("dlBtn").onclick = async () => {
   $("dlBtn").disabled = false;
 };
 
-if (password) showApp();
+if (password || authToken) showApp(); else refreshFaceUi();
 </script>
 </body>
 </html>
