@@ -54,6 +54,35 @@ restaurant and app (Glovo / Wolt), compares restaurants, and exports to Excel. B
 - Safety net: warn before replacing a saved day, keep replaced prices with a Restore button, "change this day's date".
 - Screenshot archive tab (screenshots filed by upload day, deleted after 30 days) kept inside the site. Google Drive was judged too complicated.
 
-## Things to remember
-- This file and the code were backed up outside GitHub on 7 November 2026 because the GitHub connection of the build session had changed.
-- Tests were scratch scripts in the build session and are not in the repo.
+
+## How the owner likes to work (read this first, new Claude)
+- The owner is not a developer: short plain words, say what changed and why it matters. Show visual changes as screenshots
+  (render the page with Playwright against a fake server and send the picture).
+- They asked to be challenged: when they describe how they want something, give an honest opinion, alternatives and a
+  recommendation, then do what they decide. Say plainly when something is untested or a guess.
+- NEVER push to GitHub without their explicit yes ("push it"). Ask each time. Every push to `main` that builds costs 15 Netlify credits,
+  so group changes into one push. A branch (for example `backup`) can be pushed without touching the live site.
+- Test everything before reporting it done, and say honestly what was NOT tested: nothing here was ever run against the real
+  Claude API, the real Netlify Blobs, or a real Glovo/Wolt screenshot with Georgian text. The owner's first real use is the true test.
+- Menus are Georgian. Keep names exactly as shown. Never touch repos that are not the owner's CPR repo.
+
+## Where things stand (8 November 2026)
+- GitHub `nikogoko/CPR`, branch `main`, last commit "Keep the Download Excel block on the right edge" (a4f253f).
+  NOT on GitHub yet (only in the backup zip / a local `backup` branch): Face ID, the whole Compare tab, the date-at-Save fix.
+  Everything is finished and was tested, but never deployed.
+- Netlify free plan: about 226 of 300 credits used by 15 deploys in early November; resets about the end of November.
+  Builds should be stopped ("Stop builds") and a deploy triggered by hand only when a batch is ready.
+- The build chat ran on someone else's Claude account whose GitHub login (`swork-gif`) could not see the private CPR repo,
+  so the backup could not be pushed. Fix: Claude GitHub App installed on `nikogoko` for CPR + `swork-gif` added as a collaborator,
+  or upload the zip to a `backup` branch by hand on github.com, then merge into `main` (one deploy).
+- The `ANTHROPIC_API_KEY` belongs to whichever account created it (billing and limits are on that account's Claude Console). Ask the owner.
+
+## Agreed next (not built)
+1. Safety net: a warning before today's prices replace a saved day, a copy of replaced prices with a Restore button, "change this day's date".
+2. Screenshot archive tab inside the site (screenshots filed by the day they were uploaded, shrunk, deleted after 30 days; Netlify does not
+   publish a credit rate for Blobs storage, so check the Usage page after a week). Google Drive was ruled out as too complicated.
+
+## Tests
+The build chat used scratch scripts (not in the repo): a Node script that runs the real functions against an in-memory store, and Playwright
+browser tests against a fake server (login, saving, tabs, compare, Face ID with a virtual authenticator, dates). They are in the zip under
+`session-tests/` for reference. They contain hard-coded paths from that chat and need small edits to run elsewhere.
