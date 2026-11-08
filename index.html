@@ -903,15 +903,20 @@ let SAME_SIZE = { "30": "33", "35": "33" };   // "30 cm" and "35 cm" count as 33
 let SMALL_WORDS = ["small", "mini", "little", "პატარა"];
 let NORMAL_WORDS = ["pizza", "pizzas", "piza", "pitsa", "პიცა", "normal", "regular", "standard"];
 const LARGE_WORDS = ["large", "big", "xl", "family", "giant", "medium", "დიდი", "საშუალო"];
+// Georgian plural and singular endings: "სასმელი" (drink) and "სასმელები" (drinks) are the same word for matching.
+const GEO_PLURAL = /(ებისა|ების|ებით|ებში|ებზე|ებს|ები)$/;
+const stemPlural = (w) => { const t = w.replace(GEO_PLURAL, ""); return t.length >= 2 ? t : w; };
+const stemWord = (w) => stemPlural(w).replace(/ი$/, "");
 function sizeInfo(h) {
   const m = String(h ?? "").match(/\d+(?:[.,]\d+)?/);
   if (m) { const n = m[0].replace(",", "."); return SAME_SIZE[n] ? { key: SAME_SIZE[n], how: "number", aliased: true } : { key: n, how: "number" }; }
   const words = String(h ?? "").normalize("NFKC").toLowerCase().split(/[^\p{L}\p{N}]+/u).filter(Boolean);
   const has = (list) => words.some((w) => list.includes(w));
-  if (has(LARGE_WORDS)) return { key: norm(h), how: "text" };                       // not told what these mean: do not guess
+  const textKey = words.map(stemWord).join("") || norm(h);                          // plural and singular headlines match
+  if (has(LARGE_WORDS)) return { key: textKey, how: "text" };                       // not told what these mean: do not guess
   if (has(SMALL_WORDS)) return { key: SMALL_SIZE, how: "word" };
   if (has(NORMAL_WORDS)) return { key: NORMAL_SIZE, how: "word" };
-  return { key: norm(h), how: "text" };                                              // anything else is compared as plain text
+  return { key: textKey, how: "text" };                                              // anything else is compared as plain text
 }
 const sizeKey = (h) => sizeInfo(h).key;
 // Same dish, even if spelled differently or written in another script: Margherita / Margarite / მარგარიტა all give "mrgrt".
@@ -919,7 +924,7 @@ const sizeKey = (h) => sizeInfo(h).key;
 const GEO = { "ა": "a", "ბ": "b", "გ": "g", "დ": "d", "ე": "e", "ვ": "v", "ზ": "z", "თ": "t", "ი": "i", "კ": "k", "ლ": "l", "მ": "m", "ნ": "n", "ო": "o", "პ": "p", "ჟ": "z", "რ": "r", "ს": "s", "ტ": "t", "უ": "u", "ფ": "f", "ქ": "k", "ღ": "g", "ყ": "k", "შ": "s", "ჩ": "k", "ც": "k", "ძ": "z", "წ": "k", "ჭ": "k", "ხ": "h", "ჯ": "j", "ჰ": "h" };
 const FILLER_WORDS = new Set(["pizza", "piza", "pitsa", "პიცა"]);   // "Pepperoni pizza" is "Pepperoni"
 function nameKey(name) {
-  const words = String(name ?? "").normalize("NFKD").replace(/[\u0300-\u036f]/g, "").toLowerCase().split(/[^\p{L}\p{N}]+/u).filter((w) => w && !FILLER_WORDS.has(w));
+  const words = String(name ?? "").normalize("NFKD").replace(/[\u0300-\u036f]/g, "").toLowerCase().split(/[^\p{L}\p{N}]+/u).filter((w) => w && !FILLER_WORDS.has(w)).map((w) => { const t = stemWord(w); return t.length >= 2 ? t : w; });   // plural and the singular -ი ending dropped
   const latin = words.join("").replace(/[\u10d0-\u10f0]/g, (c) => GEO[c] || "")
     .replace(/ph/g, "f").replace(/gh/g, "g").replace(/ck/g, "k").replace(/[cq]/g, "k").replace(/w/g, "v").replace(/y/g, "i").replace(/x/g, "ks")
     .replace(/kh/g, "k").replace(/sh/g, "s").replace(/zh/g, "z").replace(/th/g, "t").replace(/z/g, "s");
