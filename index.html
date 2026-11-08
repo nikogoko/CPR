@@ -298,7 +298,41 @@
     </div>
   </section>
 
+  <section class="card" id="settingsCard" hidden>
+    <h2>Settings</h2>
+    <p class="muted">Saved on the server, so every device uses the same rules.</p>
+    <div class="row">
+      <label>Warn when reads in a day go above <input type="number" id="setLimit" min="1"></label>
+    </div>
+    <h3>What counts as a 33</h3>
+    <div class="row">
+      <label>Normal size <input id="setNormalSize" size="4"></label>
+      <label>Sizes written in a headline that count as it (commas) <input id="setSame" size="22"></label>
+    </div>
+    <div class="row">
+      <label>Words that mean a normal pizza when there is no number (commas) <input id="setNormalWords" size="44"></label>
+    </div>
+    <h3>What counts as small</h3>
+    <div class="row">
+      <label>Small size <input id="setSmallSize" size="4"></label>
+      <label>Words that mean a small pizza (commas) <input id="setSmallWords" size="34"></label>
+    </div>
+    <h3>Compare</h3>
+    <div class="row">
+      <label>Percent is worked out from
+        <select id="setPercent"><option value="theirs">their price</option><option value="higher">the higher price</option></select>
+      </label>
+    </div>
+    <p>
+      <button id="setSave">Save settings</button>
+      <button class="secondary" id="setReset">Reset to defaults</button>
+      <button class="secondary" id="setClose">Close</button>
+      <span id="setMsg" class="muted"></span>
+    </p>
+  </section>
+
   <footer class="foot">
+    <button class="secondary small" id="settingsBtn">Settings</button>
     <button class="secondary small" id="faceOnBtn" hidden>Turn on Face ID on this device</button>
     <button class="secondary small" id="faceOffBtn" hidden>Turn off Face ID everywhere</button>
     <button class="secondary small" id="logoutBtn">Log out</button>
@@ -414,13 +448,43 @@ function showUsage(u) {
   const over = u.today > u.limit;
   el.className = over ? "over" : "muted";
   el.innerHTML = (over ? `⚠ You have read ${u.today} screenshots today, more than your limit of ${u.limit}. Check that you are not reading the same ones twice. ` : "")
-    + `Screenshots read today: <b>${u.today}</b> · this month: <b>${u.month}</b> · warn above <input type="number" id="usageLimit" min="1" value="${u.limit}"> a day`;
-  $("usageLimit").onchange = async () => { try { showUsage(await api("usage", { action: "setLimit", day: today(), limit: $("usageLimit").value })); } catch (e) { setStatus(e.message, "err"); } };
+    + `Screenshots read today: <b>${u.today}</b> · this month: <b>${u.month}</b> · warning above ${u.limit} a day (change it in Settings)`;
 }
 async function loadUsage() { try { showUsage(await api("usage", { action: "load", day: today() })); } catch {} }
 
+/* ---------- settings (kept on the server) ---------- */
+const csv = (t) => String(t || "").split(/[,\s]+/).map((x) => x.trim()).filter(Boolean);
+function applySettings(st) {
+  NORMAL_SIZE = st.normalSize; SMALL_SIZE = st.smallSize;
+  SAME_SIZE = Object.fromEntries(st.sameSizes.filter((n) => n !== st.normalSize).map((n) => [n, st.normalSize]));
+  SMALL_WORDS = st.smallWords; NORMAL_WORDS = st.normalWords;
+  cmp.den = st.percentBase; if ($("cmpDen")) $("cmpDen").value = cmp.den;
+  if (typeof renderCompare === "function" && linksLoaded) renderCompare();
+}
+function fillSettings(st) {
+  $("setLimit").value = st.limit; $("setNormalSize").value = st.normalSize; $("setSame").value = st.sameSizes.join(", ");
+  $("setNormalWords").value = st.normalWords.join(", "); $("setSmallSize").value = st.smallSize;
+  $("setSmallWords").value = st.smallWords.join(", "); $("setPercent").value = st.percentBase;
+}
+async function loadSettings() { try { const { settings } = await api("settings", { action: "load" }); applySettings(settings); fillSettings(settings); } catch {} }
+$("settingsBtn").onclick = () => { $("settingsCard").hidden = !$("settingsCard").hidden; $("setMsg").textContent = ""; if (!$("settingsCard").hidden) $("settingsCard").scrollIntoView({ behavior: "smooth" }); };
+$("setClose").onclick = () => { $("settingsCard").hidden = true; };
+async function sendSettings(body, okText) {
+  $("setMsg").className = "muted"; $("setMsg").textContent = "Saving…";
+  try {
+    const { settings } = await api("settings", body);
+    applySettings(settings); fillSettings(settings); loadUsage();
+    $("setMsg").className = "ok"; $("setMsg").textContent = okText;
+  } catch (e) { $("setMsg").className = "err"; $("setMsg").textContent = e.message; }
+}
+$("setSave").onclick = () => sendSettings({ action: "save", settings: {
+  limit: $("setLimit").value, normalSize: $("setNormalSize").value.trim(), sameSizes: csv($("setSame").value),
+  normalWords: csv($("setNormalWords").value), smallSize: $("setSmallSize").value.trim(), smallWords: csv($("setSmallWords").value), percentBase: $("setPercent").value
+} }, "Saved.");
+$("setReset").onclick = () => { if (confirm("Put every setting back to its default?")) sendSettings({ action: "reset" }, "Back to the defaults."); };
+
 function showApp() {
-  loadUsage();
+  loadSettings(); loadUsage();
   $("login").hidden = true; $("app").hidden = false; faceMsg(""); refreshFaceUi();
   updateSaveDate();
   const ps = $("platform");   // "Auto-detect" first, then each app
@@ -833,12 +897,12 @@ const norm = (s) => String(s ?? "").normalize("NFKC").toLowerCase().replace(/[^\
 // Without a number the wording decides: a plain "Pizza" is the normal size and a "Small pizza" the small size.
 // "Large", "Medium" and the like are not guessed, so they stay unmatched until you link them.
 // To change any of this, change the numbers, SAME_SIZE or the word lists.
-const NORMAL_SIZE = "33", SMALL_SIZE = "20";
-const SAME_SIZE = { "30": "33", "35": "33" };   // "30 cm" and "35 cm" count as 33
-const SMALL_WORDS = ["small", "mini", "little", "პატარა"];
-const NORMAL_WORDS = ["normal", "regular", "standard"];
+// These start as the defaults and are replaced by what is saved in Settings (see applySettings).
+let NORMAL_SIZE = "33", SMALL_SIZE = "20";
+let SAME_SIZE = { "30": "33", "35": "33" };   // "30 cm" and "35 cm" count as 33
+let SMALL_WORDS = ["small", "mini", "little", "პატარა"];
+let NORMAL_WORDS = ["pizza", "pizzas", "piza", "pitsa", "პიცა", "normal", "regular", "standard"];
 const LARGE_WORDS = ["large", "big", "xl", "family", "giant", "medium", "დიდი", "საშუალო"];
-const PIZZA_WORDS = ["pizza", "pizzas", "piza", "pitsa", "პიცა"];
 function sizeInfo(h) {
   const m = String(h ?? "").match(/\d+(?:[.,]\d+)?/);
   if (m) { const n = m[0].replace(",", "."); return SAME_SIZE[n] ? { key: SAME_SIZE[n], how: "number", aliased: true } : { key: n, how: "number" }; }
@@ -846,7 +910,7 @@ function sizeInfo(h) {
   const has = (list) => words.some((w) => list.includes(w));
   if (has(LARGE_WORDS)) return { key: norm(h), how: "text" };                       // not told what these mean: do not guess
   if (has(SMALL_WORDS)) return { key: SMALL_SIZE, how: "word" };
-  if (has(NORMAL_WORDS) || has(PIZZA_WORDS)) return { key: NORMAL_SIZE, how: "word" };
+  if (has(NORMAL_WORDS)) return { key: NORMAL_SIZE, how: "word" };
   return { key: norm(h), how: "text" };                                              // anything else is compared as plain text
 }
 const sizeKey = (h) => sizeInfo(h).key;
