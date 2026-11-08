@@ -318,6 +318,12 @@
       <label>Small size <input id="setSmallSize" size="4"></label>
       <label>Words that mean a small pizza (commas) <input id="setSmallWords" size="34"></label>
     </div>
+    <h3>Restaurants</h3>
+    <div class="row">
+      <label>A restaurant opens on
+        <select id="setApp"><option value="auto">the app with the newest prices</option></select>
+      </label>
+    </div>
     <h3>Compare</h3>
     <div class="row">
       <label>Percent is worked out from
@@ -356,6 +362,7 @@ let data = [];          // rows read but not yet sent (shared across devices)
 let history = [];       // saved price history
 let view = "add";       // "add", the Compare tab, or a restaurant name
 let chosenDate = {};    // restaurant|platform -> date being shown
+let defaultApp = "auto";   // from Settings: "auto", or the app a restaurant opens on
 let chosenPlatform = {}; // restaurant -> Glovo / Wolt tab being shown
 let chosenHeadline = {}; // restaurant|platform -> headline being shown (or "__all")
 let showBad = false;
@@ -458,13 +465,15 @@ function applySettings(st) {
   NORMAL_SIZE = st.normalSize; SMALL_SIZE = st.smallSize;
   SAME_SIZE = Object.fromEntries(st.sameSizes.filter((n) => n !== st.normalSize).map((n) => [n, st.normalSize]));
   SMALL_WORDS = st.smallWords; NORMAL_WORDS = st.normalWords;
+  defaultApp = st.defaultApp || "auto"; chosenPlatform = {};
+  if (isRestaurantView() && !$("app").hidden) renderRestaurant();
   cmp.den = st.percentBase; if ($("cmpDen")) $("cmpDen").value = cmp.den;
   if (typeof renderCompare === "function" && linksLoaded) renderCompare();
 }
 function fillSettings(st) {
   $("setLimit").value = st.limit; $("setNormalSize").value = st.normalSize; $("setSame").value = st.sameSizes.join(", ");
   $("setNormalWords").value = st.normalWords.join(", "); $("setSmallSize").value = st.smallSize;
-  $("setSmallWords").value = st.smallWords.join(", "); $("setPercent").value = st.percentBase;
+  $("setSmallWords").value = st.smallWords.join(", "); $("setPercent").value = st.percentBase; $("setApp").value = st.defaultApp || "auto";
 }
 async function loadSettings() { try { const { settings } = await api("settings", { action: "load" }); applySettings(settings); fillSettings(settings); } catch {} }
 $("settingsBtn").onclick = () => { $("settingsCard").hidden = !$("settingsCard").hidden; $("setMsg").textContent = ""; if (!$("settingsCard").hidden) $("settingsCard").scrollIntoView({ behavior: "smooth" }); };
@@ -479,7 +488,7 @@ async function sendSettings(body, okText) {
 }
 $("setSave").onclick = () => sendSettings({ action: "save", settings: {
   limit: $("setLimit").value, normalSize: $("setNormalSize").value.trim(), sameSizes: csv($("setSame").value),
-  normalWords: csv($("setNormalWords").value), smallSize: $("setSmallSize").value.trim(), smallWords: csv($("setSmallWords").value), percentBase: $("setPercent").value
+  normalWords: csv($("setNormalWords").value), smallSize: $("setSmallSize").value.trim(), smallWords: csv($("setSmallWords").value), percentBase: $("setPercent").value, defaultApp: $("setApp").value
 } }, "Saved.");
 $("setReset").onclick = () => { if (confirm("Put every setting back to its default?")) sendSettings({ action: "reset" }, "Back to the defaults."); };
 
@@ -492,6 +501,7 @@ function showApp() {
     [["auto", `Auto (dark = ${THEME.dark}, light = ${THEME.light})`], ...PLATFORMS.map((p) => [p, p])].forEach(([v, t]) => { const o = document.createElement("option"); o.value = v; o.textContent = t; ps.appendChild(o); });
     ps.value = lastPlatform || "auto";   // start on the app you used last
   }
+  if ($("setApp").options.length < 2) PLATFORMS.forEach((p) => { const o = document.createElement("option"); o.value = p; o.textContent = p; $("setApp").appendChild(o); });
   renderTabs(); fillRestaurantSelect();
   loadPending(); loadHistory();
 }
@@ -619,7 +629,9 @@ function renderRestaurant() {
   const extra = [...new Set(everything.map((r) => r.platform || ""))].filter((p) => !PLATFORMS.includes(p));
   const platforms = [...PLATFORMS, ...extra];
   const newestOf = (p) => everything.filter((r) => (r.platform || "") === p).map((r) => r.date).sort().pop() || "";
-  if (!platforms.includes(chosenPlatform[name]))   // open on the platform with the freshest prices
+  if (!platforms.includes(chosenPlatform[name]) && platforms.includes(defaultApp) && newestOf(defaultApp))   // your chosen app, if it has prices
+    chosenPlatform[name] = defaultApp;
+  if (!platforms.includes(chosenPlatform[name]))   // otherwise the platform with the freshest prices
     chosenPlatform[name] = [...platforms].sort((a, b) => newestOf(b).localeCompare(newestOf(a)) || platforms.indexOf(a) - platforms.indexOf(b))[0];
   const plat = chosenPlatform[name];
 
@@ -903,10 +915,21 @@ let SAME_SIZE = { "30": "33", "35": "33" };   // "30 cm" and "35 cm" count as 33
 let SMALL_WORDS = ["small", "mini", "little", "პატარა"];
 let NORMAL_WORDS = ["pizza", "pizzas", "piza", "pitsa", "პიცა", "normal", "regular", "standard"];
 const LARGE_WORDS = ["large", "big", "xl", "family", "giant", "medium", "დიდი", "საშუალო"];
-// Georgian plural and singular endings: "სასმელი" (drink) and "სასმელები" (drinks) are the same word for matching.
-const GEO_PLURAL = /(ებისა|ების|ებით|ებში|ებზე|ებს|ები)$/;
-const stemPlural = (w) => { const t = w.replace(GEO_PLURAL, ""); return t.length >= 2 ? t : w; };
-const stemWord = (w) => stemPlural(w).replace(/ი$/, "");
+// Georgian grammar, as far as matching needs it. Georgian words change their ending for number and case:
+//   სასმელი (drink) / სასმელები (drinks) / სასმელს, სასმელის, სასმელით, სასმელში ... all mean the same thing.
+// geoStem cuts those endings off, so every form of a word gives the same stem. It is deliberately simple:
+//   plural: -ები plus case endings (-ებს, -ების, -ებით, -ებად, -ებში, -ებზე, -ებთან, -ებმა, -ებისთვის ...)
+//   singular: -ი (the usual dictionary ending), -ს, -ის, -ით, -ად, -ში, -ზე, -თან, -მა, -ისთვის, -ო, and after a vowel -მ, -თი, -დ
+// A stem always keeps at least 3 letters. Words that are not Georgian are left alone. Verbs and other word types are not handled.
+const GEO_PLURAL = /(ებისთვის|ებისა|ების|ებით|ებად|ებში|ებზე|ებთან|ებმა|ებს|ებო|ები)$/;
+const GEO_SINGULAR = /(ისთვის|ისთან|ისგან|ისა|ის|ით|ად|ში|ზე|თან|მა|ს|ო|ი)$/;
+const GEO_AFTER_VOWEL = /(?<=[აეიოუ])(თი|მ|დ)$/;
+function geoStem(w) {
+  if (!/[\u10d0-\u10ff]/.test(w)) return w;
+  const cut = (re) => { const x = w.replace(re, ""); return x.length >= 3 && x !== w ? x : null; };
+  return cut(GEO_PLURAL) || cut(GEO_SINGULAR) || cut(GEO_AFTER_VOWEL) || w;
+}
+const stemWord = geoStem;
 function sizeInfo(h) {
   const m = String(h ?? "").match(/\d+(?:[.,]\d+)?/);
   if (m) { const n = m[0].replace(",", "."); return SAME_SIZE[n] ? { key: SAME_SIZE[n], how: "number", aliased: true } : { key: n, how: "number" }; }
@@ -924,7 +947,7 @@ const sizeKey = (h) => sizeInfo(h).key;
 const GEO = { "ა": "a", "ბ": "b", "გ": "g", "დ": "d", "ე": "e", "ვ": "v", "ზ": "z", "თ": "t", "ი": "i", "კ": "k", "ლ": "l", "მ": "m", "ნ": "n", "ო": "o", "პ": "p", "ჟ": "z", "რ": "r", "ს": "s", "ტ": "t", "უ": "u", "ფ": "f", "ქ": "k", "ღ": "g", "ყ": "k", "შ": "s", "ჩ": "k", "ც": "k", "ძ": "z", "წ": "k", "ჭ": "k", "ხ": "h", "ჯ": "j", "ჰ": "h" };
 const FILLER_WORDS = new Set(["pizza", "piza", "pitsa", "პიცა"]);   // "Pepperoni pizza" is "Pepperoni"
 function nameKey(name) {
-  const words = String(name ?? "").normalize("NFKD").replace(/[\u0300-\u036f]/g, "").toLowerCase().split(/[^\p{L}\p{N}]+/u).filter((w) => w && !FILLER_WORDS.has(w)).map((w) => { const t = stemWord(w); return t.length >= 2 ? t : w; });   // plural and the singular -ი ending dropped
+  const words = String(name ?? "").normalize("NFKD").replace(/[\u0300-\u036f]/g, "").toLowerCase().split(/[^\p{L}\p{N}]+/u).filter((w) => w && !FILLER_WORDS.has(w)).map(geoStem);   // every grammatical form of a Georgian word gives the same key
   const latin = words.join("").replace(/[\u10d0-\u10f0]/g, (c) => GEO[c] || "")
     .replace(/ph/g, "f").replace(/gh/g, "g").replace(/ck/g, "k").replace(/[cq]/g, "k").replace(/w/g, "v").replace(/y/g, "i").replace(/x/g, "ks")
     .replace(/kh/g, "k").replace(/sh/g, "s").replace(/zh/g, "z").replace(/th/g, "t").replace(/z/g, "s");
