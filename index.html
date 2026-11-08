@@ -46,7 +46,7 @@
   button.danger:hover:not(:disabled) { background: #5f1414; }
   button:focus-visible, input:focus-visible, select:focus-visible { outline: 3px solid var(--cheese); outline-offset: 2px; }
 
-  .topbar { display: flex; flex-wrap: wrap; gap: 12px; justify-content: space-between; align-items: center; margin-bottom: 18px; }
+  .topbar { display: flex; flex-direction: column; gap: 12px; margin-bottom: 18px; }   /* Download and Settings on top, the tabs below them */
   .dl { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: flex-end; margin-left: auto; }   /* always on the right, even when it wraps to its own line */
   .dl select { max-width: 280px; }
   .foot { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: center; padding: 6px 0 26px; }
@@ -177,12 +177,13 @@
 
 <div id="app" hidden>
   <div class="topbar">
-    <nav id="tabs"></nav>
     <div class="dl">
       <select id="dlScope" aria-label="What to download"></select>
       <button class="secondary" id="dlBtn">⬇ Download Excel</button>
+      <button class="secondary" id="settingsBtn">⚙ Settings</button>
       <span id="dlStatus" class="muted"></span>
     </div>
+    <nav id="tabs"></nav>
   </div>
 
   <!-- ADD TAB -->
@@ -332,7 +333,6 @@
   </section>
 
   <footer class="foot">
-    <button class="secondary small" id="settingsBtn">Settings</button>
     <button class="secondary small" id="faceOnBtn" hidden>Turn on Face ID on this device</button>
     <button class="secondary small" id="faceOffBtn" hidden>Turn off Face ID everywhere</button>
     <button class="secondary small" id="logoutBtn">Log out</button>
