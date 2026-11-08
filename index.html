@@ -85,6 +85,8 @@
   .err { color: #b3261e; font-weight: 600; } .ok { color: #2e7d32; font-weight: 600; }
   .scroll { overflow-x: auto; }
   .muted { color: var(--muted); }
+  #usageLine.over { color: #8a5a00; background: #fff3cd; border: 1px solid #e6c34d; border-radius: 8px; padding: 8px 10px; font-weight: 600; }
+  #usageLine input { width: 4.5em; }
 
   /* restaurant price grid */
   #restTitle { font-family: Georgia, "Times New Roman", serif; font-size: 1.8rem; color: var(--sauce); margin: 0 12px 0 0 !important; }
@@ -205,6 +207,7 @@
         <button id="readBtn">Read screenshots</button>
       </div>
       <div id="status"></div>
+      <div id="usageLine" class="muted" style="margin-top:8px"></div>
     </div>
 
     <div class="card" id="results" hidden>
@@ -405,7 +408,19 @@ function shrink(file, max = 1800) {
 }
 
 /* ---------- start-up, tabs ---------- */
+/* ---------- how many screenshots were read (warning only, never blocks) ---------- */
+function showUsage(u) {
+  const el = $("usageLine"); if (!el || !u) return;
+  const over = u.today > u.limit;
+  el.className = over ? "over" : "muted";
+  el.innerHTML = (over ? `⚠ You have read ${u.today} screenshots today, more than your limit of ${u.limit}. Check that you are not reading the same ones twice. ` : "")
+    + `Screenshots read today: <b>${u.today}</b> · this month: <b>${u.month}</b> · warn above <input type="number" id="usageLimit" min="1" value="${u.limit}"> a day`;
+  $("usageLimit").onchange = async () => { try { showUsage(await api("usage", { action: "setLimit", day: today(), limit: $("usageLimit").value })); } catch (e) { setStatus(e.message, "err"); } };
+}
+async function loadUsage() { try { showUsage(await api("usage", { action: "load", day: today() })); } catch {} }
+
 function showApp() {
+  loadUsage();
   $("login").hidden = true; $("app").hidden = false; faceMsg(""); refreshFaceUi();
   updateSaveDate();
   const ps = $("platform");   // "Auto-detect" first, then each app
@@ -733,6 +748,7 @@ $("readBtn").onclick = async () => {
       const shot = await shrink(files[i]);
       const out = await api("extract", { image: shot.image, mediaType: "image/jpeg" });
       unreadable += out.unreadable || 0;
+      try { showUsage(await api("usage", { action: "add", day: today() })); } catch {}   // counting must never stop a read
       results.push({ name: files[i].name, out, brightness: shot.brightness });
     }
   } catch (e) { error = e.message; }
