@@ -4,8 +4,8 @@ READ ALL OF THIS BEFORE CHANGING ANYTHING. It replaces the chat history of the s
 
 ## 1. What this is
 A small private website (Netlify) that reads delivery-app menu screenshots (Glovo and Wolt, menus in Georgian) with Claude, keeps a dated
-price history per restaurant and app, compares restaurants, and exports to Excel. The owner built it for a small restaurant run by their
-family (their aunt's, the owner said); "Gennaro" is that restaurant, the reference ("we") in the Compare tab. The Compare tab was modelled on
+price history per restaurant and app, compares restaurants, and exports to Excel. It is built for one small restaurant, which is the
+reference ("we") in the Compare tab (it defaults to a restaurant named "Gennaro" if one exists). The Compare tab was modelled on
 the owner's own price dashboard (a photo of it showed SKU rows, competitor columns with price and a "difference" column, a 30-day price
 index line chart, and yellow cells meaning "price changed since yesterday").
 
