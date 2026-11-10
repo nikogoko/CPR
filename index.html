@@ -87,6 +87,11 @@
   .muted { color: var(--muted); }
   #usageLine.over { color: #8a5a00; background: #fff3cd; border: 1px solid #e6c34d; border-radius: 8px; padding: 8px 10px; font-weight: 600; }
   #usageLine input { width: 4.5em; }
+  label.tick { display: inline-flex; flex-direction: row; align-items: center; gap: 6px; text-transform: none; letter-spacing: 0; font-size: .95rem; margin-right: 10px; }
+  label.tick input { width: auto; margin: 0; }
+  .srcRow { display: grid; grid-template-columns: 1fr 1.6fr 1.6fr auto; gap: 8px; margin-bottom: 8px; align-items: center; }
+  .srcRow input { width: 100%; min-width: 0; }
+  @media (max-width: 640px) { .srcRow { grid-template-columns: 1fr; padding-bottom: 8px; border-bottom: 1px dashed var(--line, #ddd); } }
 
   /* restaurant price grid */
   #restTitle { font-family: Georgia, "Times New Roman", serif; font-size: 1.8rem; color: var(--sauce); margin: 0 12px 0 0 !important; }
@@ -207,6 +212,12 @@
         <input type="file" id="files" accept="image/*" multiple>
         <button id="readBtn">Read screenshots</button>
       </div>
+      <div class="row" id="fetchRow" style="margin-top:10px">
+        <label>Fetch prices from the saved Wolt / Glovo addresses of
+          <select id="fetchScope"></select>
+        </label>
+        <button class="secondary" id="fetchBtn">⬇ Fetch prices</button>
+      </div>
       <div id="status"></div>
       <div id="usageLine" class="muted" style="margin-top:8px"></div>
     </div>
@@ -318,6 +329,24 @@
       <label>Small size <input id="setSmallSize" size="4"></label>
       <label>Words that mean a small pizza (commas) <input id="setSmallWords" size="34"></label>
     </div>
+    <h3>Restaurant addresses (Wolt and Glovo)</h3>
+    <p class="muted">Paste each restaurant's own page address from wolt.com or glovoapp.com once. The "Fetch prices" button on the Add tab uses them, one page at a time with a pause between pages.</p>
+    <div id="srcList"></div>
+    <p>
+      <button class="secondary small" id="srcAdd">+ Add a restaurant</button>
+      <button id="srcSave">Save addresses</button>
+      <span id="srcMsg" class="muted"></span>
+    </p>
+    <h3>Automatic fetching</h3>
+    <p class="muted">When this is on, the site fetches the prices from the saved addresses by itself, on the days and hour you choose, and saves them straight into the history (no checking step), dated with that day. It never touches rows you have waiting to be saved. A run can take a few hours because pages are fetched slowly, a few at a time.</p>
+    <div class="row">
+      <label class="tick"><input type="checkbox" id="setAuto"> Fetch automatically</label>
+      <label>Starting at
+        <select id="setHour"></select> Tbilisi time
+      </label>
+    </div>
+    <div class="row" id="setDays"></div>
+    <p id="autoInfo" class="muted"></p>
     <h3>Restaurants</h3>
     <div class="row">
       <label>A restaurant opens on
@@ -474,6 +503,7 @@ function fillSettings(st) {
   $("setLimit").value = st.limit; $("setNormalSize").value = st.normalSize; $("setSame").value = st.sameSizes.join(", ");
   $("setNormalWords").value = st.normalWords.join(", "); $("setSmallSize").value = st.smallSize;
   $("setSmallWords").value = st.smallWords.join(", "); $("setPercent").value = st.percentBase; $("setApp").value = st.defaultApp || "auto";
+  fillSchedule(st.schedule || { enabled: false, hour: 6, days: [1, 2, 3, 4, 5, 6, 7] });
 }
 async function loadSettings() { try { const { settings } = await api("settings", { action: "load" }); applySettings(settings); fillSettings(settings); } catch {} }
 $("settingsBtn").onclick = () => { $("settingsCard").hidden = !$("settingsCard").hidden; $("setMsg").textContent = ""; if (!$("settingsCard").hidden) $("settingsCard").scrollIntoView({ behavior: "smooth" }); };
@@ -488,12 +518,109 @@ async function sendSettings(body, okText) {
 }
 $("setSave").onclick = () => sendSettings({ action: "save", settings: {
   limit: $("setLimit").value, normalSize: $("setNormalSize").value.trim(), sameSizes: csv($("setSame").value),
-  normalWords: csv($("setNormalWords").value), smallSize: $("setSmallSize").value.trim(), smallWords: csv($("setSmallWords").value), percentBase: $("setPercent").value, defaultApp: $("setApp").value
+  normalWords: csv($("setNormalWords").value), smallSize: $("setSmallSize").value.trim(), smallWords: csv($("setSmallWords").value), percentBase: $("setPercent").value, defaultApp: $("setApp").value, schedule: readSchedule()
 } }, "Saved.");
 $("setReset").onclick = () => { if (confirm("Put every setting back to its default?")) sendSettings({ action: "reset" }, "Back to the defaults."); };
 
+/* ---------- automatic fetching: schedule controls ---------- */
+const DAY_NAMES = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+function buildScheduleControls() {
+  if ($("setHour").options.length) return;
+  for (let h = 0; h < 24; h++) { const o = document.createElement("option"); o.value = h; o.textContent = String(h).padStart(2, "0") + ":00"; $("setHour").appendChild(o); }
+  DAY_NAMES.forEach((n, i) => { const l = document.createElement("label"); l.className = "tick"; l.innerHTML = `<input type="checkbox" class="setDay" value="${i + 1}"> ${n}`; $("setDays").appendChild(l); });
+}
+function fillSchedule(sc) {
+  buildScheduleControls();
+  $("setAuto").checked = sc.enabled; $("setHour").value = sc.hour;
+  document.querySelectorAll(".setDay").forEach((c) => { c.checked = sc.days.includes(Number(c.value)); });
+}
+const readSchedule = () => ({ enabled: $("setAuto").checked, hour: Number($("setHour").value), days: [...document.querySelectorAll(".setDay")].filter((c) => c.checked).map((c) => Number(c.value)) });
+function showAutoInfo(a) {
+  const el = $("autoInfo"); if (!el) return;
+  if (!a) { el.className = "muted"; el.textContent = "No automatic run yet."; return; }
+  const when = (iso) => iso ? new Date(iso).toLocaleString([], { dateStyle: "medium", timeStyle: "short" }) : "";
+  const bits = [`Last automatic run: ${niceDate(a.date)}, started ${when(a.startedAt)}.`];
+  if (a.remaining) bits.push(`Still running: ${a.pagesOk} of ${a.total} pages done, ${a.remaining} to go.`);
+  else bits.push(`${a.pagesOk} of ${a.total} pages fetched, ${a.items} prices saved.`);
+  if (a.stopped) bits.push(a.stopped);
+  if (a.errors?.length) bits.push("⚠ Problems: " + a.errors.join(" · "));
+  el.className = a.errors?.length ? "err" : "muted"; el.textContent = bits.join(" ");
+}
+
+/* ---------- restaurant addresses and fetching prices from Wolt / Glovo ---------- */
+const FETCH_PAUSE_MS = window.__testPause ?? 6000;   // wait between pages, like a person browsing
+let sources = {};              // restaurant -> { Wolt: address, Glovo: address }
+function srcRow(name = "", wolt = "", glovo = "") {
+  const row = document.createElement("div"); row.className = "srcRow";
+  const mk = (ph, v, cls) => { const i = document.createElement("input"); i.placeholder = ph; i.value = v; i.className = cls; i.autocomplete = "off"; return i; };
+  const x = document.createElement("button"); x.className = "secondary small"; x.textContent = "Remove"; x.onclick = () => row.remove();
+  row.append(mk("Restaurant name", name, "sn"), mk("Wolt page address", wolt, "sw"), mk("Glovo page address", glovo, "sg"), x);
+  return row;
+}
+function renderSources() {
+  const box = $("srcList"); box.innerHTML = "";
+  Object.entries(sources).forEach(([n, a]) => box.appendChild(srcRow(n, a.Wolt || "", a.Glovo || "")));
+  if (!box.children.length) box.appendChild(srcRow());
+}
+function refreshFetchScope() {
+  const sel = $("fetchScope"), names = Object.keys(sources).filter((n) => sources[n].Wolt || sources[n].Glovo), before = sel.value;
+  sel.innerHTML = "";
+  const pages = (list) => list.reduce((t, n) => t + (sources[n].Wolt ? 1 : 0) + (sources[n].Glovo ? 1 : 0), 0);
+  const all = document.createElement("option"); all.value = "*"; all.textContent = names.length ? `all ${names.length} restaurants (${pages(names)} pages)` : "(add addresses in Settings first)"; sel.appendChild(all);
+  names.forEach((n) => { const o = document.createElement("option"); o.value = n; o.textContent = `${n} (${pages([n])} page${pages([n]) > 1 ? "s" : ""})`; sel.appendChild(o); });
+  if ([...sel.options].some((o) => o.value === before)) sel.value = before;
+  $("fetchBtn").disabled = !names.length;
+}
+async function loadSources() { try { const out = await api("sources", { action: "load" }); sources = out.sources || {}; renderSources(); refreshFetchScope(); showAutoInfo(out.auto); } catch {} }
+$("srcAdd").onclick = () => $("srcList").appendChild(srcRow());
+$("srcSave").onclick = async () => {
+  const out = {};
+  for (const row of $("srcList").children) {
+    const name = row.querySelector(".sn").value.trim(), w = row.querySelector(".sw").value.trim(), g = row.querySelector(".sg").value.trim();
+    if (!name && !w && !g) continue;                 // an empty row is just ignored
+    if (name in out) { $("srcMsg").className = "err"; $("srcMsg").textContent = `"${name}" is listed twice.`; return; }
+    out[name] = { Wolt: w, Glovo: g };
+  }
+  $("srcMsg").className = "muted"; $("srcMsg").textContent = "Saving…";
+  try { const saved = await api("sources", { action: "save", sources: out }); sources = saved.sources; showAutoInfo(saved.auto); renderSources(); refreshFetchScope(); $("srcMsg").className = "ok"; $("srcMsg").textContent = "Saved."; }
+  catch (e) { $("srcMsg").className = "err"; $("srcMsg").textContent = e.message; }
+};
+let fetchStop = false;
+const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+$("fetchBtn").onclick = async () => {
+  if ($("fetchBtn").dataset.running) { fetchStop = true; $("fetchBtn").textContent = "Stopping…"; return; }
+  const scope = $("fetchScope").value;
+  const names = scope === "*" ? Object.keys(sources) : [scope];
+  const jobs = names.flatMap((n) => ["Wolt", "Glovo"].filter((a) => sources[n]?.[a]).map((a) => ({ name: n, app: a, url: sources[n][a] })));
+  if (!jobs.length) return setStatus("Add the restaurants' Wolt or Glovo addresses in Settings first.", "err");
+  if (jobs.length > 1 && !confirm(`Fetch ${jobs.length} pages from Wolt and Glovo? They are fetched one by one with a ${FETCH_PAUSE_MS / 1000}-second pause, so it takes about ${Math.ceil(jobs.length * (FETCH_PAUSE_MS / 1000 + 2) / 60)} minute(s).`)) return;
+  fetchStop = false; $("fetchBtn").dataset.running = "1"; $("fetchBtn").textContent = "Stop"; $("readBtn").disabled = true;
+  let added = 0, dups = 0, done = 0; const problems = [];
+  for (let i = 0; i < jobs.length && !fetchStop; i++) {
+    const j = jobs[i];
+    setStatus(`Fetching ${i + 1} of ${jobs.length}: ${j.name} on ${j.app}…`);
+    try {
+      const out = await api("fetchmenu", { url: j.url });
+      for (const it of out.rows) {
+        const row = { restaurant: j.name, platform: j.app, item: it.item, size: it.size, sale_price: it.sale_price, regular_price: it.regular_price, notes: it.notes, popular: it.popular === true, isNew: it.isNew === true, age18: it.age18 === true };
+        if (isDup(row)) dups++; else { data.push(row); added++; }
+      }
+      done++;
+    } catch (e) { if (e.message === "Wrong password") break; problems.push(`${j.name} on ${j.app}: ${e.message}`); }
+    if (i < jobs.length - 1 && !fetchStop) await wait(FETCH_PAUSE_MS);
+  }
+  showBad = false; render(); fillRestaurantSelect(); persist();
+  const parts = [`Fetched ${added} item(s) from ${done} of ${jobs.length} page(s).`];
+  if (dups) parts.push(`${dups} repeated item(s) were skipped.`);
+  if (fetchStop) parts.push("Stopped early.");
+  if (problems.length) parts.push("⚠ " + problems.join(" · "));
+  if (added) parts.push("Check the rows, then save them. Prices on the apps may differ from what the shop charges in person.");
+  setStatus(parts.join(" "), problems.length ? "err" : "ok");
+  delete $("fetchBtn").dataset.running; $("fetchBtn").textContent = "⬇ Fetch prices"; $("readBtn").disabled = false;
+};
+
 function showApp() {
-  loadSettings(); loadUsage();
+  loadSettings(); loadUsage(); loadSources();
   $("login").hidden = true; $("app").hidden = false; faceMsg(""); refreshFaceUi();
   updateSaveDate();
   const ps = $("platform");   // "Auto-detect" first, then each app
@@ -881,7 +1008,11 @@ $("saveBtn").onclick = async () => {
     clearTimeout(saveTimer); saveTimer = null;
     const day = chosenDay();   // decided now, at the click: the date you picked, otherwise today
     const justSaved = data.map((r) => ({ ...r, date: day }));
-    const { saved, replaced } = await api("save", { rows: justSaved });
+    let saved = 0, replaced = 0;
+    for (let i = 0; i < justSaved.length; i += 500) {      // the server takes 500 rows at a time
+      const part = await api("save", { rows: justSaved.slice(i, i + 500) });
+      saved += part.saved; replaced += part.replaced;
+    }
     data = []; showBad = false; render();
     setStatus(`Saved ${saved} price(s) for ${niceDate(day)}.` + (replaced ? ` ${replaced} replaced an earlier entry for the same restaurant, platform, date, headline and item.` : ""), "ok");
     await loadHistoryUntilSeen(justSaved);   // so the new prices and restaurant appear without a reload

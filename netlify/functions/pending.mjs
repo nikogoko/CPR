@@ -10,7 +10,7 @@ export default async (req) => {
     const { action, rows } = await readBody(req);
 
     if (action === "save") {
-      if (!Array.isArray(rows) || rows.length > 1000) return json(400, { error: "rows must be a list of up to 1000" });
+      if (!Array.isArray(rows) || rows.length > 5000) return json(400, { error: "rows must be a list of up to 5000" });
       await store.setJSON("pending", rows);
       return json(200, { ok: true });
     }
