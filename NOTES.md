@@ -22,7 +22,7 @@ index line chart, and yellow cells meaning "price changed since yesterday").
 
 ## 3. Where things stand
 - Repo `nikogoko/CPR` (private), branch `main`, last commit "Keep the Download Excel block on the right edge" (a4f253f). That is what Netlify can deploy.
-- NOT on GitHub yet (finished and tested, never deployed): Face ID (passkeys), the whole Compare tab, the date-read-at-Save fix, and this file.
+- Pushed to `main` and deployed by the owner (the repo is public for now, so Netlify accepts pushes from any account): Face ID (passkeys), the Compare tab, the date-read-at-Save fix, the read counter, Settings, this file. Added after that and possibly not pushed yet (check `git log` against GitHub): Georgian grammar matching, default-app setting, fetching from Wolt/Glovo, the automatic schedule.
   They exist in the backup zip and in a local-only `backup` branch of the build chat's clone. To publish: put them on a `backup` branch (GitHub web
   "Upload files" -> "Create a new branch" works without any Claude), then merge into `main` = ONE deploy.
 - Why it could not be pushed: the build chat ran on another person's Claude account whose GitHub login (`swork-gif`) cannot see the private repo.
@@ -56,7 +56,7 @@ index line chart, and yellow cells meaning "price changed since yesterday").
 - Netlify Blobs store `price-tracker`. Keys: `history/<sha1 of the trimmed lowercase restaurant name>` = `{ name, rows[] }`; `pending` = rows waiting to be saved
   (shared across devices); `passkeys` = Face ID public keys; `links` = hand links; `challenge/<id>` = one-time Face ID challenges.
 - A row: `restaurant, platform ("Glovo"|"Wolt"|"" for entries saved before platforms existed, shown as "No platform"), item, size (the headline text; very old rows
-  hold "33 cm"), sale_price (number), regular_price (number or ""), notes, popular, isNew, age18 (booleans, absent in old rows), date (YYYY-MM-DD)`.
+  hold "33 cm"), sale_price (number), regular_price (number or ""), notes, popular, isNew, age18 (booleans, absent in old rows), date ("YYYY-MM-DD", or "YYYY-MM-DD HH:MM" for an automatic fetch: the time of the scheduled run in Tbilisi time, so two runs on one day are separate entries; plain dates still work)`.
 - Saving replaces an existing entry with the same restaurant + platform + date + headline + item (case-insensitive). The first spelling of a restaurant name is kept.
 - Hand links: `<normalised their restaurant>|<normalised their item>` -> `{ ref: <normalised your restaurant>, item: <your item's name key> }`, or item "!" = never the same;
   headline links use `...|~<normalised headline>` -> `{ ref, item: <size key> }` or "!" = not comparable.
@@ -92,6 +92,12 @@ index line chart, and yellow cells meaning "price changed since yesterday").
   guessed. Headlines that match nothing are LISTED (never dropped silently) and can be linked to one of yours or marked not comparable.
 - Priority when several of their items match one of yours: hand link, then exact name, then similar spelling. A hand link that beats an exact name shows a warning with
   "Use the exact name instead". Items that lose go to "Not matched yet".
+
+**Fetching from Wolt and Glovo** (the owner decided to go ahead although both sets of terms restrict automated access: Wolt's user terms ban bots/automated means and copying information; Glovo's restrict copying content for commercial use without written consent. This is a gray area, not a clear yes. Keep the footprint small and never add tricks to get around blocking.)
+- Settings > "Restaurant addresses": each restaurant's Wolt/Glovo page address, stored on the server (`sources`). Only wolt.com and glovoapp.com restaurant/store pages are accepted (`lib/menu-urls.mjs`).
+- Add tab "Fetch prices": one page per call (`fetchmenu`), 6 s pause between pages, results land in the normal check-then-Save table. Readers are in `lib/menu-parsers.mjs`. Wolt pages carry the whole menu as JSON (sections = headlines, prices in tetri, original_price, a "popular" tag); Glovo pages carry LIST/PRODUCT_ROW data in the streamed Next.js data (promotions give the sale price, the "Top sellers" list = Popular). The Wolt "New" tag and 18+ on Glovo are guesses or missing. If a site changes its pages the reader returns an error instead of guessing.
+- Settings > "Automatic fetching": on/off, one or two hours a day (at least 3 apart, Tbilisi time) and weekdays. `netlify/functions/autofetch.mjs` is an hourly scheduled function: it starts a run when due (3-hour catch-up window), fetches 4 pages per wake-up, saves straight into the history without a checking step, never touches the pending list, and gives up a run after 12 hours. Progress shows in Settings. Off by default. Not yet verified live: that scheduled functions run on the owner's Netlify plan, what the hourly wake-ups cost in credits, and that Netlify's servers get the same pages from Wolt/Glovo.
+- Never run load tests against Wolt or Glovo (the owner's request to find their blocking limit was declined).
 
 **Login**: the password always works. Optional Face ID / fingerprint (passkeys) set up after a password login; lasts 12 hours; works only on the exact website address it was set up on.
 
