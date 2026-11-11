@@ -338,11 +338,14 @@
       <span id="srcMsg" class="muted"></span>
     </p>
     <h3>Automatic fetching</h3>
-    <p class="muted">When this is on, the site fetches the prices from the saved addresses by itself, on the days and hour you choose, and saves them straight into the history (no checking step), dated with that day. It never touches rows you have waiting to be saved. A run can take a few hours because pages are fetched slowly, a few at a time.</p>
+    <p class="muted">When this is on, the site fetches the prices from the saved addresses by itself, on the days and hours you choose (once or twice a day), and saves them straight into the history (no checking step). Each run is saved with its time, like "10th November 2026 13:00", so a second run on the same day never replaces the first. It never touches rows you have waiting to be saved. A run can take a few hours because pages are fetched slowly, a few at a time.</p>
     <div class="row">
       <label class="tick"><input type="checkbox" id="setAuto"> Fetch automatically</label>
       <label>Starting at
         <select id="setHour"></select> Tbilisi time
+      </label>
+      <label>and again at
+        <select id="setHour2"></select>
       </label>
     </div>
     <div class="row" id="setDays"></div>
@@ -413,11 +416,12 @@ function numOf(v) {
 const money = (v) => (typeof v === "number" ? v.toFixed(2) : String(v)) + "₾";   // display only; stored values are plain numbers
 const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 // "2026-11-03" -> "3rd November 2026" (values stay ISO underneath so sorting still works)
-function niceDate(iso) {
-  const [y, m, d] = String(iso).split("-").map(Number);
+function niceDate(iso) {   // also "2026-11-03 13:00" -> "3rd November 2026 13:00" (an automatic fetch keeps its time)
+  const [day, time] = String(iso).split(" ");
+  const [y, m, d] = day.split("-").map(Number);
   if (!y || !m || !d) return String(iso);
   const suffix = d % 100 >= 11 && d % 100 <= 13 ? "th" : ({ 1: "st", 2: "nd", 3: "rd" }[d % 10] || "th");
-  return `${d}${suffix} ${MONTHS[m - 1]} ${y}`;
+  return `${d}${suffix} ${MONTHS[m - 1]} ${y}` + (time ? " " + time : "");
 }
 function setStatus(msg, cls) { $("status").textContent = msg; $("status").className = cls || ""; }
 
@@ -503,7 +507,7 @@ function fillSettings(st) {
   $("setLimit").value = st.limit; $("setNormalSize").value = st.normalSize; $("setSame").value = st.sameSizes.join(", ");
   $("setNormalWords").value = st.normalWords.join(", "); $("setSmallSize").value = st.smallSize;
   $("setSmallWords").value = st.smallWords.join(", "); $("setPercent").value = st.percentBase; $("setApp").value = st.defaultApp || "auto";
-  fillSchedule(st.schedule || { enabled: false, hour: 6, days: [1, 2, 3, 4, 5, 6, 7] });
+  fillSchedule(st.schedule || { enabled: false, hours: [6], days: [1, 2, 3, 4, 5, 6, 7] });
 }
 async function loadSettings() { try { const { settings } = await api("settings", { action: "load" }); applySettings(settings); fillSettings(settings); } catch {} }
 $("settingsBtn").onclick = () => { $("settingsCard").hidden = !$("settingsCard").hidden; $("setMsg").textContent = ""; if (!$("settingsCard").hidden) $("settingsCard").scrollIntoView({ behavior: "smooth" }); };
@@ -526,20 +530,22 @@ $("setReset").onclick = () => { if (confirm("Put every setting back to its defau
 const DAY_NAMES = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 function buildScheduleControls() {
   if ($("setHour").options.length) return;
-  for (let h = 0; h < 24; h++) { const o = document.createElement("option"); o.value = h; o.textContent = String(h).padStart(2, "0") + ":00"; $("setHour").appendChild(o); }
+  const none = document.createElement("option"); none.value = ""; none.textContent = "(only once a day)"; $("setHour2").appendChild(none);
+  for (let h = 0; h < 24; h++) for (const id of ["setHour", "setHour2"]) { const o = document.createElement("option"); o.value = h; o.textContent = String(h).padStart(2, "0") + ":00"; $(id).appendChild(o); }
   DAY_NAMES.forEach((n, i) => { const l = document.createElement("label"); l.className = "tick"; l.innerHTML = `<input type="checkbox" class="setDay" value="${i + 1}"> ${n}`; $("setDays").appendChild(l); });
 }
 function fillSchedule(sc) {
   buildScheduleControls();
-  $("setAuto").checked = sc.enabled; $("setHour").value = sc.hour;
+  const hours = sc.hours || (sc.hour !== undefined ? [sc.hour] : [6]);
+  $("setAuto").checked = sc.enabled; $("setHour").value = hours[0]; $("setHour2").value = hours[1] ?? "";
   document.querySelectorAll(".setDay").forEach((c) => { c.checked = sc.days.includes(Number(c.value)); });
 }
-const readSchedule = () => ({ enabled: $("setAuto").checked, hour: Number($("setHour").value), days: [...document.querySelectorAll(".setDay")].filter((c) => c.checked).map((c) => Number(c.value)) });
+const readSchedule = () => ({ enabled: $("setAuto").checked, hours: [Number($("setHour").value), ...($("setHour2").value === "" ? [] : [Number($("setHour2").value)])], days: [...document.querySelectorAll(".setDay")].filter((c) => c.checked).map((c) => Number(c.value)) });
 function showAutoInfo(a) {
   const el = $("autoInfo"); if (!el) return;
   if (!a) { el.className = "muted"; el.textContent = "No automatic run yet."; return; }
   const when = (iso) => iso ? new Date(iso).toLocaleString([], { dateStyle: "medium", timeStyle: "short" }) : "";
-  const bits = [`Last automatic run: ${niceDate(a.date)}, started ${when(a.startedAt)}.`];
+  const bits = [`Last automatic run: ${niceDate(a.date)} (started ${when(a.startedAt)}).`];
   if (a.remaining) bits.push(`Still running: ${a.pagesOk} of ${a.total} pages done, ${a.remaining} to go.`);
   else bits.push(`${a.pagesOk} of ${a.total} pages fetched, ${a.items} prices saved.`);
   if (a.stopped) bits.push(a.stopped);

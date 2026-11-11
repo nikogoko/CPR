@@ -3,6 +3,7 @@ import ExcelJS from "exceljs";
 import { guard, json, readBody } from "../../lib/http.mjs";
 import { openStore, readAllHistory } from "../../lib/store.mjs";
 import platforms from "../../lib/platforms.js";
+import { SNAPSHOT_RE, snapshotToDate, snapshotHasTime } from "../../lib/snapshot.mjs";
 
 const { PLATFORMS } = platforms;
 
@@ -17,9 +18,10 @@ function sheetName(name, used) {
 }
 const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 function niceDate(iso) {
-  const [y, m, d] = String(iso).split("-").map(Number);
+  const [day, time] = String(iso).split(" ");
+  const [y, m, d] = day.split("-").map(Number);
   const suffix = d % 100 >= 11 && d % 100 <= 13 ? "th" : ({ 1: "st", 2: "nd", 3: "rd" }[d % 10] || "th");
-  return `${d}${suffix} ${MONTHS[m - 1]} ${y}`;
+  return `${d}${suffix} ${MONTHS[m - 1]} ${y}` + (time ? " " + time : "");
 }
 // Tomato-red header with white text, to match the site.
 function styleHeader(row) {
@@ -50,7 +52,7 @@ export default async (req) => {
       const want = restaurant.trim().toLowerCase();
       records = records.filter((r) => String(r.name).trim().toLowerCase() === want);
     }
-    if (typeof date === "string" && /^\d{4}-\d{2}-\d{2}$/.test(date)) {
+    if (typeof date === "string" && SNAPSHOT_RE.test(date)) {
       narrowed = true;
       records = records
         .map((r) => ({ ...r, rows: r.rows.filter((x) => x.date === date && (typeof platform !== "string" || (x.platform || "") === platform)) }))
@@ -80,10 +82,11 @@ export default async (req) => {
     ];
     for (const rec of records) {
       const sorted = [...rec.rows].sort((a, b) => b.date.localeCompare(a.date));
-      for (const r of sorted)
-        all.addRow({ restaurant: rec.name, platform: platformLabel(platformOf(r)), date: new Date(r.date + "T00:00:00Z"), item: r.item, size: r.size, sale: asNum(r.sale_price), reg: asNum(r.regular_price), notes: r.notes, popular: r.popular ? "Yes" : "", isNew: r.isNew ? "Yes" : "", age18: r.age18 ? "Yes" : "" });
+      for (const r of sorted) {
+        const added = all.addRow({ restaurant: rec.name, platform: platformLabel(platformOf(r)), date: snapshotToDate(r.date), item: r.item, size: r.size, sale: asNum(r.sale_price), reg: asNum(r.regular_price), notes: r.notes, popular: r.popular ? "Yes" : "", isNew: r.isNew ? "Yes" : "", age18: r.age18 ? "Yes" : "" });
+        added.getCell("date").numFmt = snapshotHasTime(r.date) ? "d mmmm yyyy hh:mm" : "d mmmm yyyy";   // an automatic fetch shows its time
+      }
     }
-    all.getColumn("date").numFmt = "d mmmm yyyy"; // real dates, so Excel can still sort and filter them
     all.getColumn("sale").numFmt = MONEY;
     all.getColumn("reg").numFmt = MONEY;
     styleHeader(all.getRow(1));
