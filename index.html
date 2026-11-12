@@ -151,6 +151,9 @@
   #login p { margin: 0 0 16px; color: var(--muted); }
   #login label { display: flex; flex-direction: column; gap: 6px; text-align: left; font-weight: 700; margin-bottom: 14px; }
   #login input, #login button { width: 100%; }
+  #login .pwBox { display: flex; gap: 8px; }
+  #login .pwBox input { flex: 1; min-width: 0; }
+  #login .pwBox button { width: auto; flex: none; }
   #loginMsg { margin-top: 12px; }
 
   @media (max-width: 600px) {
@@ -175,7 +178,9 @@
   <p>Come on in.</p>
   <button class="secondary" id="faceBtn" hidden>🔓 Sign in with Face ID / fingerprint</button>
   <p id="faceOr" class="muted or" hidden>or use the password</p>
-  <label>Password <input type="password" id="pw"></label>
+  <label>Password
+    <span class="pwBox"><input type="password" id="pw" autocomplete="current-password"><button type="button" class="secondary small" id="pwShow" aria-pressed="false">Show</button></span>
+  </label>
   <button id="loginBtn">Enter</button>
   <div id="loginMsg" class="err"></div>
 </div>
@@ -428,6 +433,7 @@ function setStatus(msg, cls) { $("status").textContent = msg; $("status").classN
 function backToLogin(msg) {
   password = ""; authToken = ""; sessionStorage.removeItem("pw"); sessionStorage.removeItem("token");
   $("app").hidden = true; $("login").hidden = false; $("loginMsg").textContent = msg;
+  $("pw").type = "password"; $("pwShow").textContent = "Show"; $("pwShow").setAttribute("aria-pressed", "false");
   refreshFaceUi();
 }
 
@@ -643,6 +649,11 @@ $("loginBtn").onclick = async () => {
   try { await api("pending", { action: "load" }); sessionStorage.setItem("pw", password); showApp(); }   // check the password before opening the app
   catch (e) { if (e.message !== "Wrong password") $("loginMsg").textContent = e.message; }
   $("loginBtn").disabled = false;
+};
+$("pwShow").onclick = () => {   // show or hide what you typed
+  const show = $("pw").type === "password";
+  $("pw").type = show ? "text" : "password"; $("pwShow").textContent = show ? "Hide" : "Show"; $("pwShow").setAttribute("aria-pressed", show);
+  $("pw").focus();
 };
 $("pw").onkeydown = (e) => { if (e.key === "Enter") $("loginBtn").click(); };
 
