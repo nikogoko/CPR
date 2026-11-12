@@ -228,17 +228,17 @@
     </div>
 
     <div class="card" id="results" hidden>
+      <p>
+        <button id="saveBtn">Save prices</button>
+        <button class="secondary" id="clearBtn">Clear</button>
+        <span id="saveDate" class="muted"></span>
+      </p>
       <div class="scroll">
         <table>
           <thead><tr><th>Restaurant</th><th>Platform</th><th>Item</th><th>Headline</th><th>Sale price</th><th>Regular price</th><th>Offer</th><th>Popular</th><th>New</th><th>18+</th><th></th></tr></thead>
           <tbody id="rows"></tbody>
         </table>
       </div>
-      <p>
-        <button id="saveBtn">Save prices</button>
-        <button class="secondary" id="clearBtn">Clear</button>
-      <span id="saveDate" class="muted"></span>
-      </p>
     </div>
   </section>
 
@@ -288,6 +288,7 @@
           <select id="cmpDen">
             <option value="theirs">their price</option>
             <option value="higher">the higher price</option>
+            <option value="mine" id="cmpDenMine">my restaurant's price</option>
           </select>
         </label>
       </div>
@@ -316,7 +317,7 @@
   </section>
 
   <section class="card" id="settingsCard" hidden>
-    <h2>Settings</h2>
+    <div class="row" style="justify-content:space-between;align-items:center"><h2 style="margin:0">Settings</h2><button class="secondary small" id="setCloseTop">✕ Close</button></div>
     <p class="muted">Saved on the server, so every device uses the same rules.</p>
     <div class="row">
       <label>Warn when reads in a day go above <input type="number" id="setLimit" min="1"></label>
@@ -364,7 +365,7 @@
     <h3>Compare</h3>
     <div class="row">
       <label>Percent is worked out from
-        <select id="setPercent"><option value="theirs">their price</option><option value="higher">the higher price</option></select>
+        <select id="setPercent"><option value="theirs">their price</option><option value="higher">the higher price</option><option value="mine">my restaurant's price (the one chosen in Compare, Gennaro)</option></select>
       </label>
     </div>
     <p>
@@ -516,8 +517,20 @@ function fillSettings(st) {
   fillSchedule(st.schedule || { enabled: false, hours: [6], days: [1, 2, 3, 4, 5, 6, 7] });
 }
 async function loadSettings() { try { const { settings } = await api("settings", { action: "load" }); applySettings(settings); fillSettings(settings); } catch {} }
-$("settingsBtn").onclick = () => { $("settingsCard").hidden = !$("settingsCard").hidden; $("setMsg").textContent = ""; if (!$("settingsCard").hidden) $("settingsCard").scrollIntoView({ behavior: "smooth" }); };
-$("setClose").onclick = () => { $("settingsCard").hidden = true; };
+function openSettings() {
+  inSettings = true; $("setMsg").textContent = "";
+  document.querySelector(".topbar").hidden = true;
+  ["addView", "restView", "compareView"].forEach((id) => { $(id).hidden = true; });
+  $("settingsCard").hidden = false; window.scrollTo(0, 0);
+}
+function closeSettings() {   // back to the Add tab
+  inSettings = false; $("settingsCard").hidden = true;
+  document.querySelector(".topbar").hidden = false;
+  view = "add"; renderTabs(); showView();
+}
+$("settingsBtn").onclick = openSettings;
+$("setClose").onclick = closeSettings;
+$("setCloseTop").onclick = closeSettings;
 async function sendSettings(body, okText) {
   $("setMsg").className = "muted"; $("setMsg").textContent = "Saving…";
   try {
@@ -632,6 +645,7 @@ $("fetchBtn").onclick = async () => {
 };
 
 function showApp() {
+  if (inSettings) { inSettings = false; $("settingsCard").hidden = true; document.querySelector(".topbar").hidden = false; }   // logging in again never lands on Settings
   loadSettings(); loadUsage(); loadSources();
   $("login").hidden = true; $("app").hidden = false; faceMsg(""); refreshFaceUi();
   updateSaveDate();
@@ -671,7 +685,9 @@ function renderTabs() {
   restaurantsSaved().forEach((r) => add(r, r));
   add("⚖ Compare", COMPARE);
 }
+let inSettings = false;   // the Settings screen shows on its own, with nothing else
 function showView() {
+  if (inSettings) return;
   $("addView").hidden = view !== "add";
   $("restView").hidden = !isRestaurantView();
   $("compareView").hidden = view !== COMPARE;
@@ -1125,7 +1141,8 @@ function comparePrice(r) {   // original price if it has one and "original" is c
 // + means your restaurant costs MORE than theirs, - means less.
 function diffPercent(mine, theirs) {
   if (!(mine >= 0) || !(theirs > 0)) return NaN;
-  const base = cmp.den === "higher" ? Math.max(mine, theirs) : theirs;
+  const base = cmp.den === "higher" ? Math.max(mine, theirs) : cmp.den === "mine" ? mine : theirs;
+  if (!(base > 0)) return NaN;
   return Math.round(((mine - theirs) / base) * 100);
 }
 function diffTag(d) {
@@ -1160,6 +1177,7 @@ function renderCompare() {
   if (!plats.length) return stop(`No saved prices for ${cmp.ref} on Glovo or Wolt yet.`);
   if (!plats.includes(cmp.platform)) cmp.platform = plats[0];
   plats.forEach((p) => addOption($("cmpPlat"), p, p)); $("cmpPlat").value = cmp.platform;
+  $("cmpDenMine").textContent = `${cmp.ref}'s price`;   // names your restaurant, e.g. "Gennaro's price"
   $("cmpBasis").value = cmp.basis; $("cmpDen").value = cmp.den;
 
   // "Compare with": tick the restaurants to include.
@@ -1275,7 +1293,7 @@ function renderCompare() {
   const basisText = cmp.basis === "original" ? "original prices, before discounts" : "sale prices, after discounts";
   const stale = comps.filter((c) => c.date && c.date !== ref.date).map((c) => `${c.name} (${niceDate(c.date)})`);
   $("cmpLegend").textContent =
-    `+ (red): ${cmp.ref} costs more than them. − (green): ${cmp.ref} costs less. Compared on ${basisText}, as a percent of ${cmp.den === "higher" ? "the higher price" : "their price"}. ` +
+    `+ (red): ${cmp.ref} costs more than them. − (green): ${cmp.ref} costs less. Compared on ${basisText}, as a percent of ${cmp.den === "higher" ? "the higher price" : cmp.den === "mine" ? `${cmp.ref}'s price` : "their price"}. ` +
     (comps.some((c) => c.similar.length) ? "≈ = matched by a similar spelling. " : "") +
     `Prices as of ${niceDate(ref.date)} for ${cmp.ref}` + (stale.length ? `; older for ${stale.join(", ")}.` : ", and the same day for the others.") +
     (worded.length ? ` Sizes assumed: ${worded.join(", ")} (a plain "Pizza" counts as ${NORMAL_SIZE}, a small pizza as ${SMALL_SIZE}${Object.entries(SAME_SIZE).map(([a, b]) => `, ${a} cm as ${b}`).join("")}).` : "") +
