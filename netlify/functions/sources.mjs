@@ -32,7 +32,7 @@ export default async (req) => {
       }
       await store.setJSON("sources", clean);
     }
-    return json(200, { sources: (await store.get("sources", { type: "json" })) || {}, auto: summarise(await store.get("autofetch", { type: "json" })) || null });
+    return json(200, { sources: (await store.get("sources", { type: "json" })) || {}, auto: summarise(await store.get("autofetch", { type: "json" }), await store.get("autofetch-wake", { type: "json" })) });
   } catch (e) {
     return json(500, { error: e.message });
   }

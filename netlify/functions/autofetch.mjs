@@ -10,7 +10,10 @@ import { summarise } from "../../lib/auto-state.mjs";
 
 export const config = { schedule: "0 * * * *" };   // every hour, on the hour (UTC)
 
-const PAGES_PER_WAKE = 4, PAUSE_MS = 3000, CATCH_UP_HOURS = 3, GIVE_UP_AFTER_MS = 12 * 3600 * 1000, TZ = "Asia/Tbilisi";
+// A scheduled function is cut off after about 30 seconds, so a wake-up only STARTS another page while it has used less than
+// START_BUDGET_MS (a page can take up to ~8 s), and takes at most PAGES_PER_WAKE pages. Pages stay in the waiting list until they are finished.
+const PAGES_PER_WAKE = 4, PAUSE_MS = 3000, START_BUDGET_MS = 15000, MAX_TRIES = 2, CATCH_UP_HOURS = 3, GIVE_UP_AFTER_MS = 12 * 3600 * 1000, TZ = "Asia/Tbilisi";
+const clock = () => (globalThis.__priceTrackerClock ? globalThis.__priceTrackerClock() : Date.now());
 const wait = (ms) => (globalThis.__priceTrackerNoPause ? Promise.resolve() : new Promise((r) => setTimeout(r, ms)));
 
 function tbilisiNow() {
@@ -23,7 +26,10 @@ const slotName = (date, hour) => `${date} ${String(hour).padStart(2, "0")}:00`;
 
 export default async () => {
   const store = await openStore();
-  const out = (body) => new Response(JSON.stringify(body), { status: 200, headers: { "content-type": "application/json" } });
+  const out = async (body) => {                                              // every wake-up leaves a note, so Settings can show the job is alive
+    try { await store.setJSON("autofetch-wake", { at: new Date(globalThis.__priceTrackerNow || Date.now()).toISOString(), status: body.status }); } catch { /* the note is only a convenience */ }
+    return new Response(JSON.stringify(body), { status: 200, headers: { "content-type": "application/json" } });
+  };
   const now = tbilisiNow();
   const { schedule } = await loadSettings(store);
   const sources = (await store.get("sources", { type: "json" })) || {};
@@ -46,17 +52,27 @@ export default async () => {
   }
 
   st.lastStepAt = now.ms;
-  const batch = st.queue.splice(0, PAGES_PER_WAKE);
-  for (let i = 0; i < batch.length; i++) {
-    const job = batch[i];
+  const began = clock();
+  let tried = 0;                                                               // pages actually attempted in this wake-up (giving up on one does not count)
+  while (tried < PAGES_PER_WAKE && st.queue.length && (tried === 0 || clock() - began < START_BUDGET_MS)) {
+    const job = st.queue[0];                                                   // stays in the list until it is finished
+    if ((job.tries || 0) >= MAX_TRIES) {                                       // tried before and never finished (cut off or failing): give up on it
+      st.queue.shift(); if (st.errors.length < 20) st.errors.push(`${job.name} on ${job.app}: gave up after ${MAX_TRIES} tries (the page was too slow or kept failing).`);
+      await store.setJSON("autofetch", st); continue;
+    }
+    tried++; job.tries = (job.tries || 0) + 1;
+    await store.setJSON("autofetch", st);                                      // written BEFORE trying, so being cut off counts as a try
     try {
       const { rows } = await fetchMenu(job.url);
       const dated = rows.map((r) => ({ ...r, restaurant: job.name, platform: job.app, date: st.slot }));
       for (let k = 0; k < dated.length; k += 500) await saveRows(store, dated.slice(k, k + 500), { clearPending: false });   // never touches rows waiting for your Save
-      st.pagesOk++; st.items += rows.length;
-    } catch (e) { if (st.errors.length < 20) st.errors.push(`${job.name} on ${job.app}: ${e.message}`); }
+      st.pagesOk++; st.items += rows.length; st.queue.shift();
+    } catch (e) {
+      if (job.tries < MAX_TRIES) { st.queue.push(st.queue.shift()); }          // one more try later in this run
+      else { st.queue.shift(); if (st.errors.length < 20) st.errors.push(`${job.name} on ${job.app}: ${e.message}`); }
+    }
     await store.setJSON("autofetch", st);                                      // remember progress after every page
-    if (i < batch.length - 1) await wait(PAUSE_MS);
+    if (tried < PAGES_PER_WAKE && st.queue.length) await wait(PAUSE_MS);
   }
   if (!st.queue.length) st.finishedAt = new Date().toISOString();
   await store.setJSON("autofetch", st);

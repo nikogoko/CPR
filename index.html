@@ -562,13 +562,16 @@ function fillSchedule(sc) {
 const readSchedule = () => ({ enabled: $("setAuto").checked, hours: [Number($("setHour").value), ...($("setHour2").value === "" ? [] : [Number($("setHour2").value)])], days: [...document.querySelectorAll(".setDay")].filter((c) => c.checked).map((c) => Number(c.value)) });
 function showAutoInfo(a) {
   const el = $("autoInfo"); if (!el) return;
-  if (!a) { el.className = "muted"; el.textContent = "No automatic run yet."; return; }
   const when = (iso) => iso ? new Date(iso).toLocaleString([], { dateStyle: "medium", timeStyle: "short" }) : "";
+  const WAKE = { "nothing due": "nothing was due", "no addresses": "no addresses saved", "too soon": "a run was already busy", "more to do": "fetched some pages, more to do", finished: "finished a run", stopped: "stopped a run" };
+  const wake = a?.lastWake ? ` Last wake-up of the hourly job: ${when(a.lastWake.at)} (${WAKE[a.lastWake.status] || a.lastWake.status}).` : " The hourly job has not woken up yet since this was installed.";
+  if (!a || !a.hasRun) { el.className = "muted"; el.textContent = "No automatic run yet." + wake; return; }
   const bits = [`Last automatic run: ${niceDate(a.date)} (started ${when(a.startedAt)}).`];
   if (a.remaining) bits.push(`Still running: ${a.pagesOk} of ${a.total} pages done, ${a.remaining} to go.`);
   else bits.push(`${a.pagesOk} of ${a.total} pages fetched, ${a.items} prices saved.`);
   if (a.stopped) bits.push(a.stopped);
   if (a.errors?.length) bits.push("⚠ Problems: " + a.errors.join(" · "));
+  bits.push(wake.trim());
   el.className = a.errors?.length ? "err" : "muted"; el.textContent = bits.join(" ");
 }
 
