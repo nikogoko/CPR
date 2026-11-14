@@ -412,6 +412,7 @@ let chosenPlatform = {}; // restaurant -> Glovo / Wolt tab being shown
 let chosenHeadline = {}; // restaurant|platform -> headline being shown (or "__all")
 let showBad = false;
 let saveTimer = null;
+let session = 0;   // changes at every logout: a Fetch, Read or Save that started before it stops quietly
 let busy = "", hasAddresses = false, pendingInFlight = 0;   // busy: "read", "fetch" or "save" while that is working: they never run at the same time
 function syncButtons() {
   $("readBtn").disabled = !!busy; $("saveBtn").disabled = !!busy; $("clearBtn").disabled = !!busy;
@@ -452,7 +453,8 @@ function niceDate(iso) {   // also "2026-11-03 13:00" -> "3rd November 2026 13:0
 function setStatus(msg, cls) { $("status").textContent = msg; $("status").className = cls || ""; }
 
 function backToLogin(msg) {
-  clearTimeout(saveTimer); saveTimer = null; fetchStop = true; busy = ""; syncButtons();   // stop anything still going
+  session++; clearTimeout(saveTimer); saveTimer = null; fetchStop = true; busy = "";   // stop anything still going
+  delete $("fetchBtn").dataset.running; $("fetchBtn").textContent = "⬇ Fetch prices"; syncButtons();
   data = []; history = []; links = {}; showBad = false; try { render(); } catch { /* the page is hiding anyway */ }
   $("pw").value = "";
   password = ""; authToken = ""; sessionStorage.removeItem("pw"); sessionStorage.removeItem("token");
@@ -651,12 +653,14 @@ $("fetchBtn").onclick = async () => {
   if (!jobs.length) return setStatus("Add the restaurants' Wolt or Glovo addresses in Settings first.", "err");
   if (jobs.length > 1 && !confirm(`Fetch ${jobs.length} pages from Wolt and Glovo? They are fetched one by one with a ${FETCH_PAUSE_MS / 1000}-second pause, so it takes about ${Math.ceil(jobs.length * (FETCH_PAUSE_MS / 1000 + 2) / 60)} minute(s).`)) return;
   fetchStop = false; $("fetchBtn").dataset.running = "1"; $("fetchBtn").textContent = "Stop"; setBusy("fetch");
+  const mySession = session;
   let added = 0, dups = 0, done = 0; const problems = [];
-  for (let i = 0; i < jobs.length && !fetchStop; i++) {
+  for (let i = 0; i < jobs.length && !fetchStop && mySession === session; i++) {
     const j = jobs[i];
     setStatus(`Fetching ${i + 1} of ${jobs.length}: ${j.name} on ${j.app}…`);
     try {
       const out = await api("fetchmenu", { url: j.url });
+      if (mySession !== session) break;   // logged out meanwhile: nothing from this fetch belongs in the next session
       for (const it of out.rows) {
         const row = { restaurant: j.name, platform: j.app, item: it.item, size: it.size, sale_price: it.sale_price, regular_price: it.regular_price, notes: it.notes, popular: it.popular === true, isNew: it.isNew === true, age18: it.age18 === true };
         if (isDup(row)) dups++; else { data.push(row); added++; }
@@ -665,6 +669,7 @@ $("fetchBtn").onclick = async () => {
     } catch (e) { if (e.message === "Wrong password") break; problems.push(`${j.name} on ${j.app}: ${e.message}`); }
     if (i < jobs.length - 1 && !fetchStop) await wait(FETCH_PAUSE_MS);
   }
+  if (mySession !== session) return;
   showBad = false; render(); fillRestaurantSelect(); persist();
   const parts = [`Fetched ${added} item(s) from ${done} of ${jobs.length} page(s).`];
   if (dups) parts.push(`${dups} repeated item(s) were skipped.`);
@@ -1011,6 +1016,7 @@ $("readBtn").onclick = async () => {
   if (!files.length) return setStatus("Choose at least one screenshot.", "err");
   if (busy) return setStatus("Wait for the other action to finish first.", "err");
   setBusy("read");
+  const mySession = session;
   let added = 0, dups = 0, unreadable = 0, error = ""; const skippedFiles = [];
   const results = [];   // what the reader returned for each screenshot
   try {
@@ -1018,11 +1024,13 @@ $("readBtn").onclick = async () => {
       setStatus(`Reading ${i + 1} of ${files.length}…`);
       let shot; try { shot = await shrink(files[i]); } catch { skippedFiles.push(files[i].name); continue; }   // a file that cannot be opened is skipped, the rest are still read
       const out = await api("extract", { image: shot.image, mediaType: "image/jpeg" });
+      if (mySession !== session) return;   // logged out meanwhile
       unreadable += out.unreadable || 0;
       try { showUsage(await api("usage", { action: "add", day: today() })); } catch {}   // counting must never stop a read
       results.push({ name: files[i].name, out, brightness: shot.brightness });
     }
   } catch (e) { error = e.message; }
+  if (mySession !== session) return;
 
   // Work out which app each screenshot belongs to.
   const detectedOf = (r) => platformFromBrightness(r.brightness);   // dark = Wolt, light = Glovo
@@ -1074,7 +1082,7 @@ $("saveBtn").onclick = async () => {
   if (data.some((r) => FIELDS.some((f) => invalid(f, r))))
     return setStatus("Fix the red cells (restaurant, platform, item, headline and sale price are required).", "err");
   setBusy("save");
-  let justSaved = null;
+  const mySession = session; let justSaved = null, saveOk = false;
   try {
     clearTimeout(saveTimer); saveTimer = null;
     const day = chosenDay();   // decided now, at the click: the date you picked, otherwise today
@@ -1085,13 +1093,15 @@ $("saveBtn").onclick = async () => {
       const part = await api("save", { rows: justSaved.slice(i, i + 500) });
       saved += part.saved; replaced += part.replaced;
     }
+    saveOk = true;
     const sent = new Set(sending); data = data.filter((r) => !sent.has(r));   // only the rows that were saved leave the table
     showBad = false; render(); if (data.length) persist();
     $("date").value = ""; updateSaveDate();   // the date box is for one batch only: the next one is saved as today unless you pick a date again
     setStatus(`Saved ${saved} price(s) for ${niceDate(day)}.` + (replaced ? ` ${replaced} replaced an earlier entry for the same restaurant, platform, date, headline and item.` : ""), "ok");
-  } catch (e) { setStatus(e.message, "err"); }
+  } catch (e) { if (mySession === session) { setStatus(e.message, "err"); if (data.length) persist(); } }   // rows are still here: make sure the server has them too (it empties its copy after the first batch)
+  if (mySession !== session) return;
   setBusy("");
-  if (justSaved && !data.some((r) => justSaved.includes(r))) { try { await loadHistoryUntilSeen(justSaved); } catch { /* the page refreshes itself next time */ } }   // so the new prices and restaurant appear without a reload
+  if (saveOk && justSaved) { try { await loadHistoryUntilSeen(justSaved); } catch { /* the page refreshes itself next time */ } }   // so the new prices and restaurant appear without a reload
 };
 
 $("clearBtn").onclick = () => { data = []; showBad = false; render(); persist(); setStatus(""); };
@@ -1291,7 +1301,9 @@ function renderCompare() {
   // Every other restaurant's current prices, matched to yours by name + size (or by a link you saved).
   const refNorm = norm(cmp.ref);
   const linkOf = (comp, row) => { const l = linkEntry(comp, row); return l && l.ref === refNorm ? l.item : null; };
-  const refRowOf = (size, target) => refByKey.get(size + "|" + target) || refByKey.get(legacyRef.get(size + "|" + target));   // your item a link points at
+  const refRowOf = (size, target) => String(target).startsWith("=")   // "=pizza": a dish with an empty name code, linked by its plain name
+    ? group.find((r) => sizeKey(r.size) === size && norm(r.item) === target.slice(1))
+    : refByKey.get(size + "|" + target) || refByKey.get(legacyRef.get(size + "|" + target));   // your item a link points at
   const comps = others.filter((n) => !off.has(n)).map((name) => {
     const cur = newestRows(name, cmp.platform);
     // A saved link wins; "!" means "never the same dish"; otherwise match by spelling-tolerant name + size.
@@ -1396,7 +1408,8 @@ function renderCompare() {
     (comps.length > cols.length ? ` No matching items: ${comps.filter((c) => !c.matches.size).map((c) => c.name).join(", ")}.` : "");
 
   // Items with no match: pick the same dish in your list, once, and it is remembered.
-  const mine = [...new Map(group.map((r) => [nameKey(r.item), r.item])).entries()];
+  const linkValue = (r) => nameKey(r.item) || "=" + norm(r.item);   // an empty value would mean "remove the link"
+  const mine = [...new Map(group.map((r) => [linkValue(r), r.item])).entries()];
   const unmatched = comps.flatMap((c) => c.unmatched.map((row) => ({ comp: c.name, row })));
   $("cmpUnmatched").hidden = !unmatched.length;
   $("cmpUnmatchedSum").textContent = `Not matched yet (${unmatched.length})`;

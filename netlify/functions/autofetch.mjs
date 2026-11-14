@@ -66,7 +66,7 @@ export default async () => {
     try {
       const { rows } = await fetchMenu(job.url);
       const dated = rows.map((r) => ({ ...r, restaurant: job.name, platform: job.app, date: st.slot }));
-      for (let k = 0; k < dated.length; k += 500) await saveRows(store, dated.slice(k, k + 500), { clearPending: false });   // never touches rows waiting for your Save
+      for (let k = 0; k < dated.length; k += 500) await saveRows(store, dated.slice(k, k + 500), { clearPending: false, auto: true });   // never touches rows waiting for your Save
       st.pagesOk++; st.items += rows.length; st.queue.shift();
     } catch (e) {
       if (job.tries < MAX_TRIES) { st.queue.push(st.queue.shift()); }          // one more try later in this run
@@ -75,10 +75,10 @@ export default async () => {
     await store.setJSON("autofetch", st);                                      // remember progress after every page
     if (tried < PAGES_PER_WAKE && st.queue.length) await wait(PAUSE_MS);
   }
-  if (!st.queue.length) {
-    st.finishedAt = new Date().toISOString();
-    try { st.pruned = await pruneAutomatic(store, now.date); } catch { /* cleaning up is optional; try again after the next run */ }   // automatic entries older than 30 days
+  if (!st.queue.length) st.finishedAt = new Date().toISOString();
+  await store.setJSON("autofetch", st);                                        // the finished state is saved BEFORE any clean-up, so being cut off later cannot undo it
+  if (!st.queue.length && clock() - began < START_BUDGET_MS) {                  // clean-up only on a wake-up that still has time to spare; otherwise after the next run
+    try { st.pruned = await pruneAutomatic(store, now.date); await store.setJSON("autofetch", st); } catch { /* cleaning up is optional */ }   // automatic rows older than 30 days
   }
-  await store.setJSON("autofetch", st);
   return out({ status: st.queue.length ? "more to do" : "finished", ...summarise(st) });
 };
