@@ -1503,12 +1503,16 @@ async function passkeyCall(body, signedIn) {   // signedIn: also send the passwo
   return out;
 }
 // The day prices are saved under: the date box if you filled it in, otherwise today, read at the moment you press Save.
-const chosenDay = () => (/^\d{4}-\d{2}-\d{2}$/.test($("date").value) ? $("date").value : today());
+// Saved "now" (no date picked): today and the hour of the save, like an automatic run ("2026-11-12 15:00"), so two saves on one day
+// never overwrite each other. A date picked by hand is a past day: it has no real hour, so it stays a plain date.
+const nowHour = () => String(new Date().getHours()).padStart(2, "0") + ":00";
+const chosenDay = () => (/^\d{4}-\d{2}-\d{2}$/.test($("date").value) ? $("date").value : `${today()} ${nowHour()}`);
 function updateSaveDate() {
   const picked = /^\d{4}-\d{2}-\d{2}$/.test($("date").value);
-  $("saveDate").textContent = picked ? `Will be saved as ${niceDate($("date").value)}.` : `Will be saved with today's date (${niceDate(today())}).`;
+  $("saveDate").textContent = picked ? `Will be saved as ${niceDate($("date").value)} (a past day, so no hour).` : `Will be saved with today's date and this hour (${niceDate(chosenDay())}).`;
 }
 $("date").oninput = updateSaveDate;
+setInterval(updateSaveDate, 60000);   // the hour changes while the page is open
 document.addEventListener("visibilitychange", () => { if (!document.hidden) updateSaveDate(); });   // a page left open overnight shows the right day
 
 const thisDeviceHasFaceId = () => { try { return localStorage.getItem("faceThisDevice") === "1"; } catch { return false; } };
