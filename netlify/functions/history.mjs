@@ -1,6 +1,6 @@
 // Reads saved prices for the restaurant tabs, or deletes one restaurant's platform-day.
 import { guard, json, readBody } from "../../lib/http.mjs";
-import { SNAPSHOT_RE } from "../../lib/snapshot.mjs";
+import { isValidSnapshot } from "../../lib/snapshot.mjs";
 import { openStore, historyKey, readAllHistory } from "../../lib/store.mjs";
 
 export default async (req) => {
@@ -11,7 +11,7 @@ export default async (req) => {
     const store = await openStore();
 
     if (action === "deleteDate") {
-      if (typeof restaurant !== "string" || typeof platform !== "string" || !SNAPSHOT_RE.test(date || ""))
+      if (typeof restaurant !== "string" || typeof platform !== "string" || !isValidSnapshot(date || ""))
         return json(400, { error: "Need a restaurant, a platform and a date." });
       const k = historyKey(restaurant);
       const rec = await store.get(k, { type: "json" });

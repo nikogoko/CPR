@@ -3,7 +3,7 @@ import ExcelJS from "exceljs";
 import { guard, json, readBody } from "../../lib/http.mjs";
 import { openStore, readAllHistory } from "../../lib/store.mjs";
 import platforms from "../../lib/platforms.js";
-import { SNAPSHOT_RE, snapshotToDate, snapshotHasTime } from "../../lib/snapshot.mjs";
+import { isValidSnapshot, snapshotToDate, snapshotHasTime, compareSnapshots } from "../../lib/snapshot.mjs";
 
 const { PLATFORMS } = platforms;
 
@@ -52,7 +52,7 @@ export default async (req) => {
       const want = restaurant.trim().toLowerCase();
       records = records.filter((r) => String(r.name).trim().toLowerCase() === want);
     }
-    if (typeof date === "string" && SNAPSHOT_RE.test(date)) {
+    if (typeof date === "string" && isValidSnapshot(date)) {
       narrowed = true;
       records = records
         .map((r) => ({ ...r, rows: r.rows.filter((x) => x.date === date && (typeof platform !== "string" || (x.platform || "") === platform)) }))
@@ -81,7 +81,7 @@ export default async (req) => {
       { header: "18+", key: "age18", width: 8 }
     ];
     for (const rec of records) {
-      const sorted = [...rec.rows].sort((a, b) => b.date.localeCompare(a.date));
+      const sorted = [...rec.rows].sort((a, b) => compareSnapshots(b.date, a.date));
       for (const r of sorted) {
         const added = all.addRow({ restaurant: rec.name, platform: platformLabel(platformOf(r)), date: snapshotToDate(r.date), item: r.item, size: r.size, sale: asNum(r.sale_price), reg: asNum(r.regular_price), notes: r.notes, popular: r.popular ? "Yes" : "", isNew: r.isNew ? "Yes" : "", age18: r.age18 ? "Yes" : "" });
         added.getCell("date").numFmt = snapshotHasTime(r.date) ? "d mmmm yyyy hh:mm" : "d mmmm yyyy";   // an automatic fetch shows its time
@@ -105,7 +105,7 @@ export default async (req) => {
 
       for (const plat of platforms) {
         const mine = rec.rows.filter((r) => platformOf(r) === plat);
-        const newest = mine.map((r) => r.date).sort().pop();
+        const newest = mine.map((r) => r.date).sort(compareSnapshots).pop();
         const rows = mine.filter((r) => r.date === newest);
         const sizes = [...new Set(rows.map((r) => r.size))].sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));   // one column per headline
         const pizzas = [...new Set(rows.map((r) => r.item))];

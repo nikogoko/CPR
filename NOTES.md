@@ -57,6 +57,8 @@ index line chart, and yellow cells meaning "price changed since yesterday").
   (shared across devices); `passkeys` = Face ID public keys; `links` = hand links; `challenge/<id>` = one-time Face ID challenges.
 - A row: `restaurant, platform ("Glovo"|"Wolt"|"" for entries saved before platforms existed, shown as "No platform"), item, size (the headline text; very old rows
   hold "33 cm"), sale_price (number), regular_price (number or ""), notes, popular, isNew, age18 (booleans, absent in old rows), date ("YYYY-MM-DD", or "YYYY-MM-DD HH:MM" for an automatic fetch: the time of the scheduled run in Tbilisi time, so two runs on one day are separate entries; plain dates still work)`.
+- Saved days: "YYYY-MM-DD" (by hand) or "YYYY-MM-DD HH:MM" (automatic fetch). A plain date sorts as the END of its day, after the timed entries of the same day (`dkey` in the page, `lib/snapshot.mjs` on the server). Only real dates are accepted. Automatic entries older than 30 days are deleted at the end of each automatic run (`lib/prune.mjs`); hand-saved entries are never deleted.
+- Read, Fetch and Save never run at the same time (`busy` in the page). Save removes only the rows it sent, Fetch keeps its rows on the server after every page, logging out clears the page's memory, and the date box is cleared after a Save.
 - Saving replaces an existing entry with the same restaurant + platform + date + headline + item (case-insensitive). The first spelling of a restaurant name is kept.
 - Hand links: `<normalised their restaurant>|<normalised their item>` -> `{ ref: <normalised your restaurant>, item: <your item's name key> }`, or item "!" = never the same;
   headline links use `...|~<normalised headline>` -> `{ ref, item: <size key> }` or "!" = not comparable.
@@ -86,6 +88,10 @@ index line chart, and yellow cells meaning "price changed since yesterday").
 - Percent = (your price - theirs) / their price by default, or "the higher price". + red = you cost more, - green = you cost less. "Original" prices (before discounts) by
   default, or "Sale prices (after discounts)". Only items both restaurants have; the app and the headline are chosen above the table. "Compare with" ticks (All / None) choose the
   restaurants, remembered per "your restaurant" on that device. A note says when a restaurant's prices are from an older day.
+- Word groups (Settings > "Words that mean the same"; defaults in `lib/settings-rules.mjs`): words that mean the same in Georgian, English and Russian (salad / სალათი / салаты, drink, dessert, soup, cheese / formaggi / ყველი, four / quattro / ოთხი ...). Before names and headlines are compared, every word of a group is replaced by the group's first word, and Georgian plural/case endings are cut off (`geoStem`). Headlines with no size (Desserts, Salads, Drinks) are matched by their words this way; "Hot drinks" stays apart from "Drinks". A word can be in one group only.
+- Dish names: "pizza"/პიცა/"Neapolitan"/ნეაპოლიტანური and sizes in the name ("33სმ", "33 cm") are ignored, so "Pizza", "პიცა" and "ნეაპოლიტანური პიცა 33სმ" are the same plain pizza; the size comes from the headline. Old hand links (made before the word groups) still work through `legacyNameKey` / `legacySizeKey`.
+- Hand links are per size (`<their restaurant>|<their item>|<size key>`); links saved without a size (older) still apply to every size.
+- Compare takes each headline from its newest entry (a partial save does not hide the rest) and says so under the table.
 - Matching is by a spelling-tolerant name key (Margherita / Margarita / Georgian მარგარიტა; Georgian letters transliterated, vowels and doubles dropped, "pizza" ignored)
   plus the same size. Automatic similar matches are marked ≈ and listed with a "Not the same" button.
 - Size of a headline: a number wins, except 30 and 35 count as 33; no number: a plain "Pizza" is 33, "Small pizza" is 20 (Georgian პატარა too); Large/Medium/others are not

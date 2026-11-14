@@ -7,6 +7,7 @@ import { loadSettings } from "../../lib/settings-rules.mjs";
 import { fetchMenu } from "../../lib/menu-fetch.mjs";
 import { saveRows } from "../../lib/save-rows.mjs";
 import { summarise } from "../../lib/auto-state.mjs";
+import { pruneAutomatic } from "../../lib/prune.mjs";
 
 export const config = { schedule: "0 * * * *" };   // every hour, on the hour (UTC)
 
@@ -74,7 +75,10 @@ export default async () => {
     await store.setJSON("autofetch", st);                                      // remember progress after every page
     if (tried < PAGES_PER_WAKE && st.queue.length) await wait(PAUSE_MS);
   }
-  if (!st.queue.length) st.finishedAt = new Date().toISOString();
+  if (!st.queue.length) {
+    st.finishedAt = new Date().toISOString();
+    try { st.pruned = await pruneAutomatic(store, now.date); } catch { /* cleaning up is optional; try again after the next run */ }   // automatic entries older than 30 days
+  }
   await store.setJSON("autofetch", st);
   return out({ status: st.queue.length ? "more to do" : "finished", ...summarise(st) });
 };

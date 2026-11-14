@@ -89,6 +89,10 @@
   #usageLine input { width: 4.5em; }
   label.tick { display: inline-flex; flex-direction: row; align-items: center; gap: 6px; text-transform: none; letter-spacing: 0; font-size: .95rem; margin-right: 10px; }
   label.tick input { width: auto; margin: 0; }
+  #settingsCard label, #settingsCard .row > * { min-width: 0; max-width: 100%; }
+  #settingsCard input:not([type=checkbox]), #settingsCard select, #settingsCard textarea { max-width: 100%; box-sizing: border-box; }
+  #settingsCard input[size] { width: 100%; }
+  #settingsCard textarea { width: 100%; font: inherit; line-height: 1.5; padding: 8px 10px; border: 1px solid var(--line, #d9c9b0); border-radius: 8px; background: #fff; }
   .srcRow { display: grid; grid-template-columns: 1fr 1.6fr 1.6fr auto; gap: 8px; margin-bottom: 8px; align-items: center; }
   .srcRow input { width: 100%; min-width: 0; }
   @media (max-width: 640px) { .srcRow { grid-template-columns: 1fr; padding-bottom: 8px; border-bottom: 1px dashed var(--line, #ddd); } }
@@ -335,6 +339,9 @@
       <label>Small size <input id="setSmallSize" size="4"></label>
       <label>Words that mean a small pizza (commas) <input id="setSmallWords" size="34"></label>
     </div>
+    <h3>Words that mean the same (for Compare)</h3>
+    <p class="muted">One group per line, words separated by commas. Compare treats every word of a group as the first one, in any language, so "Salads", სალათი and салаты match, and so do "Quattro formaggi" and ოთხი ყველი. Write Georgian words in their basic form; plural and endings are handled for you. One word per entry, and a word can only be in one group.</p>
+    <textarea id="setGroups" rows="10" spellcheck="false" autocapitalize="off" autocomplete="off"></textarea>
     <h3>Restaurant addresses (Wolt and Glovo)</h3>
     <p class="muted">Paste each restaurant's own page address from wolt.com or glovoapp.com once. The "Fetch prices" button on the Add tab uses them, one page at a time with a pause between pages.</p>
     <div id="srcList"></div>
@@ -405,6 +412,12 @@ let chosenPlatform = {}; // restaurant -> Glovo / Wolt tab being shown
 let chosenHeadline = {}; // restaurant|platform -> headline being shown (or "__all")
 let showBad = false;
 let saveTimer = null;
+let busy = "", hasAddresses = false, pendingInFlight = 0;   // busy: "read", "fetch" or "save" while that is working: they never run at the same time
+function syncButtons() {
+  $("readBtn").disabled = !!busy; $("saveBtn").disabled = !!busy; $("clearBtn").disabled = !!busy;
+  $("fetchBtn").disabled = busy === "fetch" ? false : (!!busy || !hasAddresses);   // while fetching, this button is the Stop button
+}
+function setBusy(kind) { busy = kind; syncButtons(); }
 let pickedNew = false;   // true only when the user deliberately chose "New restaurant"
 
 const key = (s) => String(s ?? "").trim().toLowerCase();
@@ -412,14 +425,21 @@ function today() {
   const d = new Date(), p = (n) => String(n).padStart(2, "0");
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
 }
-function numOf(v) {
-  let s = String(v ?? "").replace(/[^\d.,]/g, "");
+function numOf(v) {   // "28,00" = 28, "28.00" = 28, "1,234.50" and "1,234" = 1234.5 and 1234; a minus sign is not a price
+  const text = String(v ?? "").trim();
+  if (/^-/.test(text)) return NaN;
+  let s = text.replace(/[^\d.,]/g, "");
   if (!s) return NaN;
-  if (s.includes(",") && s.includes(".")) s = s.replace(/,/g, "");
+  if (s.includes(",") && s.includes(".")) s = s.lastIndexOf(",") > s.lastIndexOf(".") ? s.replace(/\./g, "").replace(",", ".") : s.replace(/,/g, "");   // the last mark is the decimal point
+  else if (/^\d{1,3}(,\d{3})+$/.test(s)) s = s.replace(/,/g, "");
   else s = s.replace(",", ".");
   return parseFloat(s);
 }
 const money = (v) => (typeof v === "number" ? v.toFixed(2) : String(v)) + "₾";   // display only; stored values are plain numbers
+// Saved days sort by this: a plain date ("2026-11-10", typed by hand, no time) counts as the END of that day, after any automatic
+// entry with a time ("2026-11-10 06:00"), because it is normally added later in the day.
+const dkey = (d) => (String(d).length > 10 ? String(d) : d + " 24:00");
+const byDate = (a, b) => dkey(a).localeCompare(dkey(b));
 const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 // "2026-11-03" -> "3rd November 2026" (values stay ISO underneath so sorting still works)
 function niceDate(iso) {   // also "2026-11-03 13:00" -> "3rd November 2026 13:00" (an automatic fetch keeps its time)
@@ -432,6 +452,9 @@ function niceDate(iso) {   // also "2026-11-03 13:00" -> "3rd November 2026 13:0
 function setStatus(msg, cls) { $("status").textContent = msg; $("status").className = cls || ""; }
 
 function backToLogin(msg) {
+  clearTimeout(saveTimer); saveTimer = null; fetchStop = true; busy = ""; syncButtons();   // stop anything still going
+  data = []; history = []; links = {}; showBad = false; try { render(); } catch { /* the page is hiding anyway */ }
+  $("pw").value = "";
   password = ""; authToken = ""; sessionStorage.removeItem("pw"); sessionStorage.removeItem("token");
   $("app").hidden = true; $("login").hidden = false; $("loginMsg").textContent = msg;
   $("pw").type = "password"; $("pwShow").textContent = "Show"; $("pwShow").setAttribute("aria-pressed", "false");
@@ -483,7 +506,7 @@ function shrink(file, max = 1800) {
       c.getContext("2d").drawImage(img, 0, 0, c.width, c.height);
       resolve({ image: c.toDataURL("image/jpeg", 0.85).split(",")[1], brightness: medianBrightness(c) });
     };
-    img.onerror = reject;
+    img.onerror = () => reject(new Error(`Could not open "${file.name}"`));
     img.src = URL.createObjectURL(file);
   });
 }
@@ -500,11 +523,14 @@ function showUsage(u) {
 async function loadUsage() { try { showUsage(await api("usage", { action: "load", day: today() })); } catch {} }
 
 /* ---------- settings (kept on the server) ---------- */
-const csv = (t) => String(t || "").split(/[,\s]+/).map((x) => x.trim()).filter(Boolean);
+const csv = (t) => String(t || "").split(/[,\n]+/).map((x) => x.trim()).filter(Boolean);
+const groupsToText = (g) => (g || []).map((x) => x.join(", ")).join("\n");
+const textToGroups = (t) => String(t || "").split("\n").map((line) => csv(line)).filter((x) => x.length);
 function applySettings(st) {
   NORMAL_SIZE = st.normalSize; SMALL_SIZE = st.smallSize;
   SAME_SIZE = Object.fromEntries(st.sameSizes.filter((n) => n !== st.normalSize).map((n) => [n, st.normalSize]));
   SMALL_WORDS = st.smallWords; NORMAL_WORDS = st.normalWords;
+  applyWordGroups(st.wordGroups);
   defaultApp = st.defaultApp || "auto"; chosenPlatform = {};
   if (isRestaurantView() && !$("app").hidden) renderRestaurant();
   cmp.den = st.percentBase; if ($("cmpDen")) $("cmpDen").value = cmp.den;
@@ -514,6 +540,7 @@ function fillSettings(st) {
   $("setLimit").value = st.limit; $("setNormalSize").value = st.normalSize; $("setSame").value = st.sameSizes.join(", ");
   $("setNormalWords").value = st.normalWords.join(", "); $("setSmallSize").value = st.smallSize;
   $("setSmallWords").value = st.smallWords.join(", "); $("setPercent").value = st.percentBase; $("setApp").value = st.defaultApp || "auto";
+  $("setGroups").value = groupsToText(st.wordGroups);
   fillSchedule(st.schedule || { enabled: false, hours: [6], days: [1, 2, 3, 4, 5, 6, 7] });
 }
 async function loadSettings() { try { const { settings } = await api("settings", { action: "load" }); applySettings(settings); fillSettings(settings); } catch {} }
@@ -541,7 +568,7 @@ async function sendSettings(body, okText) {
 }
 $("setSave").onclick = () => sendSettings({ action: "save", settings: {
   limit: $("setLimit").value, normalSize: $("setNormalSize").value.trim(), sameSizes: csv($("setSame").value),
-  normalWords: csv($("setNormalWords").value), smallSize: $("setSmallSize").value.trim(), smallWords: csv($("setSmallWords").value), percentBase: $("setPercent").value, defaultApp: $("setApp").value, schedule: readSchedule()
+  normalWords: csv($("setNormalWords").value), smallSize: $("setSmallSize").value.trim(), smallWords: csv($("setSmallWords").value), percentBase: $("setPercent").value, defaultApp: $("setApp").value, schedule: readSchedule(), wordGroups: textToGroups($("setGroups").value)
 } }, "Saved.");
 $("setReset").onclick = () => { if (confirm("Put every setting back to its default?")) sendSettings({ action: "reset" }, "Back to the defaults."); };
 
@@ -597,7 +624,7 @@ function refreshFetchScope() {
   const all = document.createElement("option"); all.value = "*"; all.textContent = names.length ? `all ${names.length} restaurants (${pages(names)} pages)` : "(add addresses in Settings first)"; sel.appendChild(all);
   names.forEach((n) => { const o = document.createElement("option"); o.value = n; o.textContent = `${n} (${pages([n])} page${pages([n]) > 1 ? "s" : ""})`; sel.appendChild(o); });
   if ([...sel.options].some((o) => o.value === before)) sel.value = before;
-  $("fetchBtn").disabled = !names.length;
+  hasAddresses = names.length > 0; syncButtons();
 }
 async function loadSources() { try { const out = await api("sources", { action: "load" }); sources = out.sources || {}; renderSources(); refreshFetchScope(); showAutoInfo(out.auto); } catch {} }
 $("srcAdd").onclick = () => $("srcList").appendChild(srcRow());
@@ -617,12 +644,13 @@ let fetchStop = false;
 const wait = (ms) => new Promise((r) => setTimeout(r, ms));
 $("fetchBtn").onclick = async () => {
   if ($("fetchBtn").dataset.running) { fetchStop = true; $("fetchBtn").textContent = "Stopping…"; return; }
+  if (busy) return setStatus("Wait for the other action to finish first.", "err");
   const scope = $("fetchScope").value;
   const names = scope === "*" ? Object.keys(sources) : [scope];
   const jobs = names.flatMap((n) => ["Wolt", "Glovo"].filter((a) => sources[n]?.[a]).map((a) => ({ name: n, app: a, url: sources[n][a] })));
   if (!jobs.length) return setStatus("Add the restaurants' Wolt or Glovo addresses in Settings first.", "err");
   if (jobs.length > 1 && !confirm(`Fetch ${jobs.length} pages from Wolt and Glovo? They are fetched one by one with a ${FETCH_PAUSE_MS / 1000}-second pause, so it takes about ${Math.ceil(jobs.length * (FETCH_PAUSE_MS / 1000 + 2) / 60)} minute(s).`)) return;
-  fetchStop = false; $("fetchBtn").dataset.running = "1"; $("fetchBtn").textContent = "Stop"; $("readBtn").disabled = true;
+  fetchStop = false; $("fetchBtn").dataset.running = "1"; $("fetchBtn").textContent = "Stop"; setBusy("fetch");
   let added = 0, dups = 0, done = 0; const problems = [];
   for (let i = 0; i < jobs.length && !fetchStop; i++) {
     const j = jobs[i];
@@ -633,7 +661,7 @@ $("fetchBtn").onclick = async () => {
         const row = { restaurant: j.name, platform: j.app, item: it.item, size: it.size, sale_price: it.sale_price, regular_price: it.regular_price, notes: it.notes, popular: it.popular === true, isNew: it.isNew === true, age18: it.age18 === true };
         if (isDup(row)) dups++; else { data.push(row); added++; }
       }
-      done++;
+      done++; persist();   // the rows so far are kept on the server, so switching to another app and back loses nothing
     } catch (e) { if (e.message === "Wrong password") break; problems.push(`${j.name} on ${j.app}: ${e.message}`); }
     if (i < jobs.length - 1 && !fetchStop) await wait(FETCH_PAUSE_MS);
   }
@@ -644,7 +672,7 @@ $("fetchBtn").onclick = async () => {
   if (problems.length) parts.push("⚠ " + problems.join(" · "));
   if (added) parts.push("Check the rows, then save them. Prices on the apps may differ from what the shop charges in person.");
   setStatus(parts.join(" "), problems.length ? "err" : "ok");
-  delete $("fetchBtn").dataset.running; $("fetchBtn").textContent = "⬇ Fetch prices"; $("readBtn").disabled = false;
+  delete $("fetchBtn").dataset.running; $("fetchBtn").textContent = "⬇ Fetch prices"; setBusy("");
 };
 
 function showApp() {
@@ -791,7 +819,7 @@ function renderRestaurant() {
   // Glovo and Wolt are always offered; any other value (older entries) only if it exists.
   const extra = [...new Set(everything.map((r) => r.platform || ""))].filter((p) => !PLATFORMS.includes(p));
   const platforms = [...PLATFORMS, ...extra];
-  const newestOf = (p) => everything.filter((r) => (r.platform || "") === p).map((r) => r.date).sort().pop() || "";
+  const newestOf = (p) => everything.filter((r) => (r.platform || "") === p).map((r) => r.date).sort(byDate).pop() || "";
   if (!platforms.includes(chosenPlatform[name]) && platforms.includes(defaultApp) && newestOf(defaultApp))   // your chosen app, if it has prices
     chosenPlatform[name] = defaultApp;
   if (!platforms.includes(chosenPlatform[name]))   // otherwise the platform with the freshest prices
@@ -807,7 +835,7 @@ function renderRestaurant() {
   });
 
   const mine = everything.filter((r) => (r.platform || "") === plat);
-  const dates = [...new Set(mine.map((r) => r.date))].sort().reverse();   // newest first
+  const dates = [...new Set(mine.map((r) => r.date))].sort(byDate).reverse();   // newest first
   const empty = !dates.length;
   $("dateRow").hidden = $("gridWrap").hidden = $("legend").hidden = empty;
   $("platEmpty").hidden = !empty;
@@ -830,7 +858,7 @@ function renderRestaurant() {
   rows.forEach((r) => cell.set(r.item + "\u0000" + r.size, r));   // if a day was sent twice, the last one wins
   // Most recent earlier record of each pizza+size ON THE SAME PLATFORM, for the ▲/▼ comparison.
   const before = new Map();
-  mine.filter((r) => r.date < d).sort((a, b) => a.date.localeCompare(b.date))
+  mine.filter((r) => dkey(r.date) < dkey(d)).sort((a, b) => byDate(a.date, b.date))
     .forEach((r) => before.set(r.item + "\u0000" + r.size, r));
 
   // Headline dropdown: one headline's items (default), or every headline side by side.
@@ -874,6 +902,7 @@ $("headSel").onchange = () => { chosenHeadline[view + "|" + chosenPlatform[view]
 
 /* ---------- pending rows (shared via the server) ---------- */
 async function loadPending() {
+  if (busy || saveTimer || pendingInFlight) return;   // never replace rows that are being read, fetched or saved right now
   try {
     data = (await api("pending", { action: "load" })).rows;
     render(); fillRestaurantSelect();
@@ -884,12 +913,14 @@ function persist() {
   clearTimeout(saveTimer);
   saveTimer = setTimeout(async () => {
     saveTimer = null;
+    pendingInFlight++;
     try { await api("pending", { action: "save", rows: data }); }
     catch (e) { setStatus("Could not save rows: " + e.message, "err"); }
+    finally { pendingInFlight--; }
   }, 600);
 }
 document.addEventListener("visibilitychange", () => {
-  if (!document.hidden && !$("app").hidden && !saveTimer) { loadPending(); loadHistory(); }
+  if (!document.hidden && !$("app").hidden && !saveTimer && !busy && !pendingInFlight) { loadPending(); loadHistory(); }
 });
 // Leaving or refreshing the page: send any edit that is still waiting for its 0.6s timer right now.
 function flushPending() {
@@ -978,13 +1009,14 @@ $("readBtn").onclick = async () => {
   const restaurant = chosenRestaurant(), choice = $("platform").value, files = [...$("files").files];
   if (!restaurant) return setStatus("Choose or type the restaurant first.", "err");
   if (!files.length) return setStatus("Choose at least one screenshot.", "err");
-  $("readBtn").disabled = true;
-  let added = 0, dups = 0, unreadable = 0, error = "";
+  if (busy) return setStatus("Wait for the other action to finish first.", "err");
+  setBusy("read");
+  let added = 0, dups = 0, unreadable = 0, error = ""; const skippedFiles = [];
   const results = [];   // what the reader returned for each screenshot
   try {
     for (let i = 0; i < files.length; i++) {
       setStatus(`Reading ${i + 1} of ${files.length}…`);
-      const shot = await shrink(files[i]);
+      let shot; try { shot = await shrink(files[i]); } catch { skippedFiles.push(files[i].name); continue; }   // a file that cannot be opened is skipped, the rest are still read
       const out = await api("extract", { image: shot.image, mediaType: "image/jpeg" });
       unreadable += out.unreadable || 0;
       try { showUsage(await api("usage", { action: "add", day: today() })); } catch {}   // counting must never stop a read
@@ -1028,32 +1060,38 @@ $("readBtn").onclick = async () => {
   if (unsure.length) parts.push(`⚠ Could not tell which app ${unsure.join(", ")} came from: choose the platform in the table.`);
   if (dups) parts.push(`${dups} repeated item(s) from overlapping screenshots were skipped.`);
   if (unreadable) parts.push(`⚠ ${unreadable} card(s) could not be read, so check the screenshot.`);
+  if (skippedFiles.length) parts.push(`⚠ Could not open ${skippedFiles.join(", ")} (not a picture this browser can read, for example HEIC): skipped.`);
   if (error) parts.push("Stopped: " + error);
   else parts.push("Check the rows, then save them.");
-  setStatus(parts.join(" "), error || unreadable || unsure.length || Object.keys(assumed).length ? "err" : "ok");
-  $("readBtn").disabled = false;
+  setStatus(parts.join(" "), error || unreadable || skippedFiles.length || unsure.length || Object.keys(assumed).length ? "err" : "ok");
+  setBusy("");
 };
 
 $("saveBtn").onclick = async () => {
+  if (busy) return setStatus("Wait for the other action to finish first.", "err");
   if (!data.length) return setStatus("Nothing to send.", "err");
   showBad = true; render();
   if (data.some((r) => FIELDS.some((f) => invalid(f, r))))
     return setStatus("Fix the red cells (restaurant, platform, item, headline and sale price are required).", "err");
-  $("saveBtn").disabled = true;
+  setBusy("save");
+  let justSaved = null;
   try {
     clearTimeout(saveTimer); saveTimer = null;
     const day = chosenDay();   // decided now, at the click: the date you picked, otherwise today
-    const justSaved = data.map((r) => ({ ...r, date: day }));
+    const sending = data.slice();
+    justSaved = sending.map((r) => ({ ...r, date: day }));
     let saved = 0, replaced = 0;
     for (let i = 0; i < justSaved.length; i += 500) {      // the server takes 500 rows at a time
       const part = await api("save", { rows: justSaved.slice(i, i + 500) });
       saved += part.saved; replaced += part.replaced;
     }
-    data = []; showBad = false; render();
+    const sent = new Set(sending); data = data.filter((r) => !sent.has(r));   // only the rows that were saved leave the table
+    showBad = false; render(); if (data.length) persist();
+    $("date").value = ""; updateSaveDate();   // the date box is for one batch only: the next one is saved as today unless you pick a date again
     setStatus(`Saved ${saved} price(s) for ${niceDate(day)}.` + (replaced ? ` ${replaced} replaced an earlier entry for the same restaurant, platform, date, headline and item.` : ""), "ok");
-    await loadHistoryUntilSeen(justSaved);   // so the new prices and restaurant appear without a reload
   } catch (e) { setStatus(e.message, "err"); }
-  $("saveBtn").disabled = false;
+  setBusy("");
+  if (justSaved && !data.some((r) => justSaved.includes(r))) { try { await loadHistoryUntilSeen(justSaved); } catch { /* the page refreshes itself next time */ } }   // so the new prices and restaurant appear without a reload
 };
 
 $("clearBtn").onclick = () => { data = []; showBad = false; render(); persist(); setStatus(""); };
@@ -1090,52 +1128,96 @@ const LARGE_WORDS = ["large", "big", "xl", "family", "giant", "medium", "დი�
 // A stem always keeps at least 3 letters. Words that are not Georgian are left alone. Verbs and other word types are not handled.
 const GEO_PLURAL = /(ებისთვის|ებისა|ების|ებით|ებად|ებში|ებზე|ებთან|ებმა|ებს|ებო|ები)$/;
 const GEO_SINGULAR = /(ისთვის|ისთან|ისგან|ისა|ის|ით|ად|ში|ზე|თან|მა|ს|ო|ი)$/;
-const GEO_AFTER_VOWEL = /(?<=[აეიოუ])(თი|მ|დ)$/;
+const GEO_AFTER_VOWEL = /([აეიოუ])(თი|მ|დ)$/;   // written without a lookbehind: iPhones before iOS 16.4 cannot read those and the whole page would stop
 function geoStem(w) {
   if (!/[\u10d0-\u10ff]/.test(w)) return w;
-  const cut = (re) => { const x = w.replace(re, ""); return x.length >= 3 && x !== w ? x : null; };
-  return cut(GEO_PLURAL) || cut(GEO_SINGULAR) || cut(GEO_AFTER_VOWEL) || w;
+  const cut = (re, keep = "") => { const x = w.replace(re, keep); return x.length >= 3 && x !== w ? x : null; };
+  return cut(GEO_PLURAL) || cut(GEO_SINGULAR) || cut(GEO_AFTER_VOWEL, "$1") || w;
 }
-const stemWord = geoStem;
-function sizeInfo(h) {
-  const m = String(h ?? "").match(/\d+(?:[.,]\d+)?/);
-  if (m) { const n = m[0].replace(",", "."); return SAME_SIZE[n] ? { key: SAME_SIZE[n], how: "number", aliased: true } : { key: n, how: "number" }; }
-  const words = String(h ?? "").normalize("NFKC").toLowerCase().split(/[^\p{L}\p{N}]+/u).filter(Boolean);
-  const has = (list) => words.some((w) => list.includes(w));
-  const textKey = words.map(stemWord).join("") || norm(h);                          // plural and singular headlines match
-  if (has(LARGE_WORDS)) return { key: textKey, how: "text" };                       // not told what these mean: do not guess
-  if (has(SMALL_WORDS)) return { key: SMALL_SIZE, how: "word" };
-  if (has(NORMAL_WORDS)) return { key: NORMAL_SIZE, how: "word" };
-  return { key: textKey, how: "text" };                                              // anything else is compared as plain text
+
+// Word groups: words that mean the same thing in different languages ("Salads" / სალათი / салаты, "Quattro formaggi" / ოთხი ყველი).
+// The groups come from Settings. Every word of a group is replaced by the group's first word before names and headlines are compared.
+let WORD_MAP = new Map();   // word (lower case, also its Georgian stem) -> the group's first word
+function applyWordGroups(groups) {
+  const m = new Map();
+  for (const g of groups || []) {
+    const canon = String(g[0] || "").normalize("NFKC").toLowerCase();
+    for (const raw of g) {
+      const w = String(raw).normalize("NFKC").toLowerCase();
+      for (const k of [w, geoStem(w)]) if (!m.has(k)) m.set(k, canon);
+    }
+  }
+  WORD_MAP = m;
 }
-const sizeKey = (h) => sizeInfo(h).key;
-// Same dish, even if spelled differently or written in another script: Margherita / Margarite / მარგარიტა all give "mrgrt".
-// Georgian letters become Latin ones, spelling variants are folded together, then vowels and doubled letters are dropped.
+// A word in its group form. Falls back to the Georgian stem, so plural and singular still match without any group; English plurals (-s, -es) too.
+const canonWord = (w) => WORD_MAP.get(w) || WORD_MAP.get(geoStem(w)) || WORD_MAP.get(w.replace(/es$/, "")) || WORD_MAP.get(w.replace(/s$/, "")) || geoStem(w);
+
+// The same text letters turned into one short code: Georgian letters become Latin ones, spelling variants are folded together,
+// then vowels and doubled letters are dropped. Margherita / Margarite / მარგარიტა all give "mrgrt".
 const GEO = { "ა": "a", "ბ": "b", "გ": "g", "დ": "d", "ე": "e", "ვ": "v", "ზ": "z", "თ": "t", "ი": "i", "კ": "k", "ლ": "l", "მ": "m", "ნ": "n", "ო": "o", "პ": "p", "ჟ": "z", "რ": "r", "ს": "s", "ტ": "t", "უ": "u", "ფ": "f", "ქ": "k", "ღ": "g", "ყ": "k", "შ": "s", "ჩ": "k", "ც": "k", "ძ": "z", "წ": "k", "ჭ": "k", "ხ": "h", "ჯ": "j", "ჰ": "h" };
-const FILLER_WORDS = new Set(["pizza", "piza", "pitsa", "პიცა"]);   // "Pepperoni pizza" is "Pepperoni"
-function nameKey(name) {
-  const words = String(name ?? "").normalize("NFKD").replace(/[\u0300-\u036f]/g, "").toLowerCase().split(/[^\p{L}\p{N}]+/u).filter((w) => w && !FILLER_WORDS.has(w)).map(geoStem);   // every grammatical form of a Georgian word gives the same key
+function phraseKey(words) {
   const latin = words.join("").replace(/[\u10d0-\u10f0]/g, (c) => GEO[c] || "")
     .replace(/ph/g, "f").replace(/gh/g, "g").replace(/ck/g, "k").replace(/[cq]/g, "k").replace(/w/g, "v").replace(/y/g, "i").replace(/x/g, "ks")
     .replace(/kh/g, "k").replace(/sh/g, "s").replace(/zh/g, "z").replace(/th/g, "t").replace(/z/g, "s");
   const skeleton = latin.replace(/[aeiou]/g, "").replace(/(.)\1+/g, "$1");
   return skeleton.length >= 3 ? skeleton : latin.replace(/(.)\1+/g, "$1");   // very short names keep their vowels, so "Ai" and "Oi" stay different
 }
+function sizeInfo(h) {
+  const m = String(h ?? "").match(/\d+(?:[.,]\d+)?/);
+  if (m) { const n = m[0].replace(",", "."); return SAME_SIZE[n] ? { key: SAME_SIZE[n], how: "number", aliased: true } : { key: n, how: "number" }; }
+  const words = String(h ?? "").normalize("NFKC").toLowerCase().split(/[^\p{L}\p{N}]+/u).filter(Boolean);
+  const has = (list) => words.some((w) => list.includes(w));
+  const textKey = "t" + phraseKey(words.map(canonWord).sort()) || norm(h);       // same words, any order, any form, any language group
+  if (has(LARGE_WORDS)) return { key: textKey, how: "text" };                       // not told what these mean: do not guess
+  if (has(SMALL_WORDS)) return { key: SMALL_SIZE, how: "word" };
+  if (has(NORMAL_WORDS)) return { key: NORMAL_SIZE, how: "word" };
+  return { key: textKey, how: "text" };                                              // anything else is compared by its words
+}
+const sizeKey = (h) => sizeInfo(h).key;
+
+// Dish names. Words that say nothing about WHICH dish are left out: "pizza", the style word "Neapolitan", and sizes ("33სმ", "33 cm"):
+// "Pizza", "პიცა" and "ნეაპოლიტანური პიცა 33სმ" are all just "a pizza"; the size comes from the headline.
+const NAME_FILLER = new Set(["pizza", "pizzas", "piza", "pitsa", "პიცა", "პიც", "neapolitan", "napoletana", "napoletano", "ნეაპოლიტანური", "ნეაპოლიტანულ"]);
+const SIZE_UNITS = new Set(["cm", "სმ", "см", "sm"]);
+function nameWords(name) {
+  const raw = String(name ?? "").normalize("NFKD").replace(/[\u0300-\u036f]/g, "").toLowerCase().split(/[^\p{L}\p{N}]+/u).filter(Boolean), out = [];
+  for (let i = 0; i < raw.length; i++) {
+    const w = raw[i];
+    if (/^\d+(cm|სმ|см|sm)$/.test(w)) continue;                                       // "33სმ"
+    if (/^\d+$/.test(w) && SIZE_UNITS.has(raw[i + 1])) { i++; continue; }            // "33" "სმ"
+    if (SIZE_UNITS.has(w) || NAME_FILLER.has(w) || NAME_FILLER.has(geoStem(w))) continue;
+    out.push(canonWord(w));
+  }
+  return out;
+}
+const nameKey = (name) => phraseKey(nameWords(name));
+
+// The way names and headlines were compared before the word groups. Hand links saved earlier hold keys made this way, so they still work.
+const legacyNameKey = (name) => phraseKey(String(name ?? "").normalize("NFKD").replace(/[\u0300-\u036f]/g, "").toLowerCase().split(/[^\p{L}\p{N}]+/u).filter((w) => w && !["pizza", "piza", "pitsa", "პიცა"].includes(w)).map(geoStem));
+const legacySizeKey = (h) => { const i = sizeInfo(h); return i.how === "text" ? String(h ?? "").normalize("NFKC").toLowerCase().split(/[^\p{L}\p{N}]+/u).filter(Boolean).map(geoStem).join("") : i.key; };
 const naturalSort = (a, b) => a.localeCompare(b, undefined, { numeric: true });
 
 // Headline links share the same saved list as item links; their key starts with "~" (item names never contain it).
+// A link is saved per size ("Margherita" at 33 is not "Margherita" at 25). Links saved earlier had no size and still apply to every size.
+const linkKeyOf = (comp, row) => norm(comp) + "|" + norm(row.item) + "|" + compSize(comp, row);
+const linkEntry = (comp, row) => links[linkKeyOf(comp, row)] || links[norm(comp) + "|" + norm(row.item)];
 const headLinkOf = (comp, headline) => { const l = links[norm(comp) + "|~" + norm(headline)]; return l && l.ref === norm(cmp.ref) ? l.item : null; };
 // The size a competitor's row counts as: your choice for its headline, else the number in the headline. "!" = left out on purpose.
+let refSizeSet = new Set(), legacyHeadMap = new Map();   // set on every Compare draw: your headlines' size keys, and the older form of them (for links saved before the word groups)
 function compSize(comp, row) {
   const h = headLinkOf(comp, row.size);
   if (h === "!") return "!" + norm(row.size);
+  if (h && !refSizeSet.has(h) && legacyHeadMap.has(h)) return legacyHeadMap.get(h);
   return h || sizeKey(row.size);
 }
 
-function newestRows(restaurant, platform) {   // the most recent day saved for this restaurant on this app
+function newestRows(restaurant, platform) {   // the latest prices for this restaurant on this app, headline by headline
   const mine = history.filter((r) => r.restaurant === restaurant && (r.platform || "") === platform);
-  const date = mine.map((r) => r.date).sort().pop();
-  return { date, rows: mine.filter((r) => r.date === date) };
+  const date = mine.map((r) => r.date).sort(byDate).pop();
+  const newest = new Map();   // headline -> the latest entry that has it, so saving only a few headlines never hides the others
+  mine.forEach((r) => { const d = newest.get(r.size); if (d === undefined || byDate(d, r.date) < 0) newest.set(r.size, r.date); });
+  const older = [...newest.entries()].filter(([, d]) => d !== date).map(([headline, d]) => ({ headline, date: d }));
+  return { date, rows: mine.filter((r) => newest.get(r.size) === r.date), older };
 }
 function comparePrice(r) {   // original price if it has one and "original" is chosen, else the price customers pay
   const sale = numOf(r.sale_price), original = numOf(r.regular_price);
@@ -1196,6 +1278,7 @@ function renderCompare() {
   });
 
   const ref = newestRows(cmp.ref, cmp.platform);
+  refSizeSet = new Set(ref.rows.map((r) => sizeKey(r.size))); legacyHeadMap = new Map(ref.rows.map((r) => [legacySizeKey(r.size), sizeKey(r.size)]));
   const heads = [...new Set(ref.rows.map((r) => r.size))].sort(naturalSort);
   if (cmp.headline !== ALL && !heads.includes(cmp.headline)) cmp.headline = heads[0];
   heads.forEach((h) => addOption($("cmpHead"), h, h)); addOption($("cmpHead"), ALL, "All headlines"); $("cmpHead").value = cmp.headline;
@@ -1203,14 +1286,22 @@ function renderCompare() {
   const groupSizes = new Set(group.map((r) => sizeKey(r.size)));
   const refKey = (r) => sizeKey(r.size) + "|" + nameKey(r.item);
   const refByKey = new Map(); group.forEach((r) => refByKey.set(refKey(r), r));
+  const legacyRef = new Map(); group.forEach((r) => legacyRef.set(sizeKey(r.size) + "|" + legacyNameKey(r.item), refKey(r)));   // links saved before the word groups point at these
 
   // Every other restaurant's current prices, matched to yours by name + size (or by a link you saved).
   const refNorm = norm(cmp.ref);
-  const linkOf = (comp, row) => { const l = links[norm(comp) + "|" + norm(row.item)]; return l && l.ref === refNorm ? l.item : null; };
+  const linkOf = (comp, row) => { const l = linkEntry(comp, row); return l && l.ref === refNorm ? l.item : null; };
+  const refRowOf = (size, target) => refByKey.get(size + "|" + target) || refByKey.get(legacyRef.get(size + "|" + target));   // your item a link points at
   const comps = others.filter((n) => !off.has(n)).map((name) => {
     const cur = newestRows(name, cmp.platform);
     // A saved link wins; "!" means "never the same dish"; otherwise match by spelling-tolerant name + size.
-    const keyOf = (row) => { const l = linkOf(name, row); return l === "!" ? "!" + norm(row.item) : compSize(name, row) + "|" + (l || nameKey(row.item)); };
+    const keyOf = (row) => {
+      const l = linkOf(name, row), sz = compSize(name, row);
+      if (l === "!") return "!" + norm(row.item);
+      if (!l) return sz + "|" + nameKey(row.item);
+      const target = refRowOf(sz, l);
+      return target ? refKey(target) : sz + "|" + l;
+    };
     // If several of their items point at the same one of yours, the best match wins:
     // a link you made by hand (3), then the exact same name (2), then only a similar spelling (1).
     const best = new Map(), unmatched = [], conflicts = [];
@@ -1233,7 +1324,7 @@ function renderCompare() {
       matches.set(k, m.row);
       if (m.linked) linked.push(m.row); else if (m.rank === 1) similar.push({ row: m.row, mine: m.mine });
     });
-    return { name, date: cur.date, rows: cur.rows, matches, unmatched, linked, similar, conflicts };
+    return { name, date: cur.date, rows: cur.rows, older: cur.older, matches, unmatched, linked, similar, conflicts };
   }).filter((c) => c.rows.length);
   if (!comps.length) return stop(others.every((n) => off.has(n)) ? "Tick at least one restaurant under \"Compare with\"." : `No ticked restaurant has saved prices on ${cmp.platform} yet.`);
 
@@ -1299,6 +1390,7 @@ function renderCompare() {
     `+ (red): ${cmp.ref} costs more than them. − (green): ${cmp.ref} costs less. Compared on ${basisText}, as a percent of ${cmp.den === "higher" ? "the higher price" : cmp.den === "mine" ? `${cmp.ref}'s price` : "their price"}. ` +
     (comps.some((c) => c.similar.length) ? "≈ = matched by a similar spelling. " : "") +
     `Prices as of ${niceDate(ref.date)} for ${cmp.ref}` + (stale.length ? `; older for ${stale.join(", ")}.` : ", and the same day for the others.") +
+    ([{ name: cmp.ref, older: ref.older }, ...comps].filter((x) => x.older && x.older.length).map((x) => ` ${x.name}: ${x.older.length} headline(s) are from an earlier entry (${niceDate(x.older.map((o) => o.date).sort(byDate)[0])}${x.older.length > 1 && new Set(x.older.map((o) => o.date)).size > 1 ? " or later" : ""}) because the newest entry does not have them.`).join("")) +
     (worded.length ? ` Sizes assumed: ${worded.join(", ")} (a plain "Pizza" counts as ${NORMAL_SIZE}, a small pizza as ${SMALL_SIZE}${Object.entries(SAME_SIZE).map(([a, b]) => `, ${a} cm as ${b}`).join("")}).` : "") +
     (loose.length ? ` ${new Set(loose.map((x) => x.comp)).size} restaurant(s) have headlines that do not match yours: their items are left out until you link them (see below).` : "") +
     (comps.length > cols.length ? ` No matching items: ${comps.filter((c) => !c.matches.size).map((c) => c.name).join(", ")}.` : "");
@@ -1314,7 +1406,7 @@ function renderCompare() {
   unmatched.forEach(({ comp, row }) => {
     const tr = ub.insertRow(); tr.insertCell().textContent = comp; tr.insertCell().textContent = row.item; tr.insertCell().textContent = money(comparePrice(row));
     const sel = document.createElement("select"); addOption(sel, "", "— not the same —"); mine.forEach(([n, label]) => addOption(sel, n, label));
-    sel.onchange = () => saveLink(comp, row.item, sel.value);
+    sel.onchange = () => saveLink(comp, row, sel.value);
     tr.insertCell().appendChild(sel);
   });
   $("cmpHeads").hidden = !loose.length && !setByHand.length;
@@ -1344,7 +1436,7 @@ function renderCompare() {
     const text = document.createElement("span");
     text.textContent = `⚠ ${comp}: your link uses "${used.item}" (${money(comparePrice(used))}) for ${mine.item}, but ${comp} also has an item named exactly "${ignored.item}" (${money(comparePrice(ignored))}). The exact one is not used.`;
     box.appendChild(text);
-    const x = document.createElement("button"); x.className = "secondary small"; x.textContent = "Use the exact name instead"; x.onclick = () => saveLink(comp, used.item, ""); box.appendChild(x);
+    const x = document.createElement("button"); x.className = "secondary small"; x.textContent = "Use the exact name instead"; x.onclick = () => saveLink(comp, used, ""); box.appendChild(x);
     warn.appendChild(box);
   });
   const sim = comps.flatMap((c) => c.similar.map(({ row, mine }) => ({ comp: c.name, row, mine })));
@@ -1354,7 +1446,7 @@ function renderCompare() {
   sim.forEach(({ comp, row, mine }) => {
     const box = document.createElement("div"); box.className = "linkRow";
     const text = document.createElement("span"); text.textContent = `${comp} · "${row.item}"  ≈  "${mine.item}"`; box.appendChild(text);
-    const x = document.createElement("button"); x.className = "secondary small"; x.textContent = "Not the same"; x.onclick = () => saveLink(comp, row.item, "!"); box.appendChild(x);
+    const x = document.createElement("button"); x.className = "secondary small"; x.textContent = "Not the same"; x.onclick = () => saveLink(comp, row, "!"); box.appendChild(x);
     simList.appendChild(box);
   });
   const done = comps.flatMap((c) => c.linked.map((row) => ({ comp: c.name, row })));
@@ -1362,9 +1454,9 @@ function renderCompare() {
   $("cmpLinkedSum").textContent = `Linked by hand (${done.length})`;
   const list = $("cmpLinkedList"); list.innerHTML = "";
   done.forEach(({ comp, row }) => {
-    const target = group.find((r) => nameKey(r.item) === linkOf(comp, row)), box = document.createElement("div"); box.className = "linkRow";
+    const target = refRowOf(compSize(comp, row), linkOf(comp, row)), box = document.createElement("div"); box.className = "linkRow";
     const text = document.createElement("span"); text.textContent = `${comp} · ${row.item}  →  ${target ? target.item : "?"}`; box.appendChild(text);
-    const x = document.createElement("button"); x.className = "secondary small"; x.textContent = "Unlink"; x.onclick = () => saveLink(comp, row.item, ""); box.appendChild(x);
+    const x = document.createElement("button"); x.className = "secondary small"; x.textContent = "Unlink"; x.onclick = () => saveLink(comp, row, ""); box.appendChild(x);
     list.appendChild(box);
   });
 }
@@ -1373,8 +1465,10 @@ async function saveHeadLink(comp, headline, target) {   // headline links live i
   try { links = (await api("links", { action: "set", comp: norm(comp), item: "~" + norm(headline), ref: norm(cmp.ref), target })).links || {}; renderCompare(); }
   catch (e) { alert(e.message); renderCompare(); }
 }
-async function saveLink(comp, item, target) {
-  try { links = (await api("links", { action: "set", comp: norm(comp), item: norm(item), ref: norm(cmp.ref), target })).links || {}; renderCompare(); }
+async function saveLink(comp, row, target) {
+  const sized = norm(row.item) + "|" + compSize(comp, row);
+  const useOld = target === "" && !links[norm(comp) + "|" + sized] && links[norm(comp) + "|" + norm(row.item)];   // removing a link that was saved without a size
+  try { links = (await api("links", { action: "set", comp: norm(comp), item: useOld ? norm(row.item) : sized, ref: norm(cmp.ref), target })).links || {}; renderCompare(); }
   catch (e) { alert(e.message); renderCompare(); }
 }
 ["cmpRef", "cmpPlat", "cmpHead", "cmpBasis", "cmpDen"].forEach((id) => {

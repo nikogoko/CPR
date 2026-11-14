@@ -11,7 +11,8 @@ export default async (req) => {
     const { action, settings } = await readBody(req);
     const store = await openStore();
     if (action === "save") {
-      const v = validate(settings);
+      if (!settings || typeof settings !== "object" || Array.isArray(settings)) return json(400, { error: "Nothing to save: the settings did not arrive. Reload the page and try again." });
+      const v = validate({ ...(await loadSettings(store)), ...settings });   // anything an older page does not send keeps its saved value
       if (v.error) return json(400, { error: v.error });
       await store.setJSON("settings", v.settings);
     } else if (action === "reset") {
