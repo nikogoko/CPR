@@ -70,7 +70,7 @@ export default async (req) => {
     all.columns = [
       { header: "Restaurant", key: "restaurant", width: 20 },
       { header: "Platform", key: "platform", width: 12 },
-      { header: "Date", key: "date", width: 20 },
+      { header: "Date", key: "date", width: 27 },   // wide enough for the longest date with its hour ("30 September 2026 15:00"); too narrow shows ####
       { header: "Item", key: "item", width: 42 },
       { header: "Headline", key: "size", width: 34 },
       { header: "Sale price", key: "sale", width: 12 },
@@ -85,6 +85,7 @@ export default async (req) => {
       for (const r of sorted) {
         const added = all.addRow({ restaurant: rec.name, platform: platformLabel(platformOf(r)), date: snapshotToDate(r.date), item: r.item, size: r.size, sale: asNum(r.sale_price), reg: asNum(r.regular_price), notes: r.notes, popular: r.popular ? "Yes" : "", isNew: r.isNew ? "Yes" : "", age18: r.age18 ? "Yes" : "" });
         added.getCell("date").numFmt = snapshotHasTime(r.date) ? "d mmmm yyyy hh:mm" : "d mmmm yyyy";   // an automatic fetch shows its time
+        added.getCell("date").alignment = { horizontal: "left" };   // dates are right-aligned by default and would touch the item name
       }
     }
     all.getColumn("sale").numFmt = MONEY;
