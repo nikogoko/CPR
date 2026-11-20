@@ -148,6 +148,18 @@
   .cmpMore { margin-top: 14px; border-top: 1px dashed var(--line); padding-top: 10px; }
   .cmpMore summary { cursor: pointer; font-weight: 700; }
   .cmpMore select { max-width: 260px; }
+  #cmpUnFilter { width: 100%; max-width: 340px; box-sizing: border-box; }
+  #cmpGrid td:first-child, #cmpGrid th:first-child { min-width: 120px; white-space: normal; }
+  #cmpUnTable input { min-width: 180px; }
+  @media (max-width: 640px) {   /* the lists you match by hand become small cards: nothing to scroll sideways */
+    #cmpUnTable thead, #cmpHeadTable thead { display: none; }
+    #cmpUnTable tr, #cmpHeadTable tr { display: block; padding: 8px 0; border-bottom: 1px dashed var(--line, #ddd); }
+    #cmpUnTable td, #cmpHeadTable td { display: inline-block; border: 0; padding: 2px 10px 2px 0; }
+    #cmpUnTable td:first-child, #cmpHeadTable td:first-child { display: block; font-weight: 700; }
+    #cmpUnTable td:last-child, #cmpHeadTable td:last-child { display: block; padding-top: 6px; }
+    #cmpUnTable input { width: 100%; box-sizing: border-box; min-width: 0; margin-bottom: 6px; }
+    #cmpHeadTable select { max-width: 100%; }
+  }
   .linkRow { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 6px 0; }
 
   /* login */
@@ -302,7 +314,14 @@
       <div class="scroll" id="cmpWrap"><table class="grid cmp" id="cmpGrid"></table></div>
       <p class="legend" id="cmpLegend"></p>
       <details class="cmpMore" id="cmpUnmatched"><summary id="cmpUnmatchedSum"></summary>
-        <p class="muted">These items have no match in your restaurant. If one is the same dish under a different name, pick it: the link is saved and used every time.</p>
+        <p class="muted">These items of theirs have no match in your restaurant yet, including items under headlines that do not match yours. Type or pick the same dish of yours (any headline): the link is saved and used every time. If it is not the same dish, press "Not the same".</p>
+        <div class="row" style="margin-bottom:8px">
+          <button class="secondary small" id="cmpAIBtn">✨ Match the rest with Claude</button>
+          <span class="muted" id="cmpAIStatus">Asks Claude which of their items are the same dish as yours (translations, different spelling). Costs a few cents. You check every suggestion before it is saved.</span>
+        </div>
+        <div id="cmpAI"></div>
+        <input id="cmpUnFilter" type="search" placeholder="Filter by restaurant, headline or item…" autocomplete="off" style="max-width:340px;margin-bottom:8px">
+        <datalist id="cmpAllMine"></datalist>
         <div class="scroll"><table class="grid" id="cmpUnTable"></table></div>
       </details>
       <details class="cmpMore" id="cmpHeads"><summary id="cmpHeadsSum"></summary>
@@ -370,6 +389,17 @@
       </label>
     </div>
     <h3>Compare</h3>
+    <div class="row">
+      <label class="tick"><input type="checkbox" id="setLearn"> Learn from labels written in two languages, like "სასმელები / drinks"</label>
+    </div>
+    <div class="row">
+      <label>Names that are a few letters off, or share most words
+        <select id="setMatch"><option value="off">do not match them</option><option value="careful">match them, carefully</option><option value="generous">match them, generously</option></select>
+      </label>
+    </div>
+    <div class="row">
+      <label>Words that do not say which dish it is (commas) <input id="setIgnore" size="44"></label>
+    </div>
     <div class="row">
       <label>Percent is worked out from
         <select id="setPercent"><option value="theirs">their price</option><option value="higher">the higher price</option><option value="mine">my restaurant's price (the one chosen in Compare, Gennaro)</option></select>
@@ -454,6 +484,7 @@ function setStatus(msg, cls) { $("status").textContent = msg; $("status").classN
 
 function backToLogin(msg) {
   session++; clearTimeout(saveTimer); saveTimer = null; fetchStop = true; busy = "";   // stop anything still going
+  aiBusy = false; aiSuggestions = []; cmpState = null; $("cmpAIBtn").disabled = false; renderAI();   // a Claude request that was under way is dropped
   delete $("fetchBtn").dataset.running; $("fetchBtn").textContent = "⬇ Fetch prices"; syncButtons();
   data = []; history = []; links = {}; showBad = false; try { render(); } catch { /* the page is hiding anyway */ }
   $("pw").value = "";
@@ -533,6 +564,8 @@ function applySettings(st) {
   SAME_SIZE = Object.fromEntries(st.sameSizes.filter((n) => n !== st.normalSize).map((n) => [n, st.normalSize]));
   SMALL_WORDS = st.smallWords; NORMAL_WORDS = st.normalWords;
   applyWordGroups(st.wordGroups);
+  IGNORE_WORDS = new Set((st.ignoreWords || []).map((w) => String(w).toLowerCase())); LEARN_BILINGUAL = st.learnBilingual !== false; MATCH_LEVEL = st.matchLevel || "careful";
+  rebuildLearned();
   defaultApp = st.defaultApp || "auto"; chosenPlatform = {};
   if (isRestaurantView() && !$("app").hidden) renderRestaurant();
   cmp.den = st.percentBase; if ($("cmpDen")) $("cmpDen").value = cmp.den;
@@ -543,6 +576,7 @@ function fillSettings(st) {
   $("setNormalWords").value = st.normalWords.join(", "); $("setSmallSize").value = st.smallSize;
   $("setSmallWords").value = st.smallWords.join(", "); $("setPercent").value = st.percentBase; $("setApp").value = st.defaultApp || "auto";
   $("setGroups").value = groupsToText(st.wordGroups);
+  $("setLearn").checked = st.learnBilingual !== false; $("setMatch").value = st.matchLevel || "careful"; $("setIgnore").value = (st.ignoreWords || []).join(", ");
   fillSchedule(st.schedule || { enabled: false, hours: [6], days: [1, 2, 3, 4, 5, 6, 7] });
 }
 async function loadSettings() { try { const { settings } = await api("settings", { action: "load" }); applySettings(settings); fillSettings(settings); } catch {} }
@@ -570,7 +604,7 @@ async function sendSettings(body, okText) {
 }
 $("setSave").onclick = () => sendSettings({ action: "save", settings: {
   limit: $("setLimit").value, normalSize: $("setNormalSize").value.trim(), sameSizes: csv($("setSame").value),
-  normalWords: csv($("setNormalWords").value), smallSize: $("setSmallSize").value.trim(), smallWords: csv($("setSmallWords").value), percentBase: $("setPercent").value, defaultApp: $("setApp").value, schedule: readSchedule(), wordGroups: textToGroups($("setGroups").value)
+  normalWords: csv($("setNormalWords").value), smallSize: $("setSmallSize").value.trim(), smallWords: csv($("setSmallWords").value), percentBase: $("setPercent").value, defaultApp: $("setApp").value, schedule: readSchedule(), wordGroups: textToGroups($("setGroups").value), learnBilingual: $("setLearn").checked, matchLevel: $("setMatch").value, ignoreWords: csv($("setIgnore").value)
 } }, "Saved.");
 $("setReset").onclick = () => { if (confirm("Put every setting back to its default?")) sendSettings({ action: "reset" }, "Back to the defaults."); };
 
@@ -760,7 +794,7 @@ const chosenRestaurant = () => ($("rest").value === NEW ? $("newRest").value.tri
 
 /* ---------- saved history ---------- */
 async function loadHistory() {
-  try { history = (await api("history", { action: "read" })).rows; }
+  try { history = (await api("history", { action: "read" })).rows; rebuildLearned(); }
   catch (e) { setStatus("Could not load saved prices: " + e.message, "err"); }
   if (isRestaurantView() && !restaurantsSaved().includes(view)) view = "add";
   renderTabs(); fillRestaurantSelect(); showView();
@@ -1172,12 +1206,63 @@ function phraseKey(words) {
   const skeleton = latin.replace(/[aeiou]/g, "").replace(/(.)\1+/g, "$1");
   return skeleton.length >= 3 ? skeleton : latin.replace(/(.)\1+/g, "$1");   // very short names keep their vowels, so "Ai" and "Oi" stay different
 }
+// ---- Labels written in two languages: "სასმელები / drinks", "მარგარიტა (Margherita)". Both parts say the same thing. ----
+const SCRIPTS = [["geo", /[\u10d0-\u10ff]/], ["cyr", /[\u0400-\u04ff]/], ["lat", /[a-z]/i]];
+const scriptOf = (part) => { const found = SCRIPTS.filter(([, re]) => re.test(part)).map(([n]) => n); return found.length === 1 ? found[0] : ""; };
+function labelParts(label) {   // the parts of a label that says one thing in several languages, or null for any other label
+  const text = String(label ?? "");
+  if (!/[\/|(]/.test(text)) return null;
+  let parts = text.split(/\s*[\/|]\s*/);
+  if (parts.length < 2) { const m = text.match(/^(.*?)\s*\((.+)\)\s*$/); if (m) parts = [m[1], m[2]]; }
+  parts = parts.map((p) => p.trim()).filter(Boolean);
+  if (parts.length < 2 || parts.some((p) => p.split(/\s+/).length > 5)) return null;
+  const scripts = parts.map(scriptOf);
+  if (scripts.some((x) => !x) || new Set(scripts).size !== scripts.length) return null;   // every part in its own script (Georgian, Russian, English)
+  return parts;
+}
+// What the page has learned from your own data: every bilingual label tells that its parts mean the same, so
+// "სასმელები / drinks" teaches that "drinks" and სასმელები are one thing (a union-find over the keys). Switched on or off in Settings.
+let LEARNED = new Map(), LEARN_BILINGUAL = true, IGNORE_WORDS = new Set(), MATCH_LEVEL = "careful";   // MATCH_LEVEL: off | careful | generous
+function rootOf(k) {
+  let r = k; while (LEARNED.has(r)) r = LEARNED.get(r);
+  let c = k; while (LEARNED.has(c)) { const n = LEARNED.get(c); LEARNED.set(c, r); c = n; }
+  return r;
+}
+const canonKey = (k) => (LEARNED.size ? rootOf(k) : k);
+function unionKeys(a, b) { const ra = rootOf(a), rb = rootOf(b); if (ra !== rb) { if (ra < rb) LEARNED.set(rb, ra); else LEARNED.set(ra, rb); } }
+const wordsOf = (text) => String(text ?? "").normalize("NFKC").toLowerCase().split(/[^\p{L}\p{N}]+/u).filter(Boolean);
+// The same word written in two languages in one label should count once.
+function uniqueByCode(words) {
+  const seen = new Set(), out = [];
+  for (const w of words) { const c = phraseKey([w]); if (c && seen.has(c)) continue; if (c) seen.add(c); out.push(w); }
+  return out;
+}
+const rawTextKey = (text) => "t" + phraseKey(uniqueByCode(wordsOf(text).map(canonWord)).sort());   // headline words: any order, any form, any language group
+function rebuildLearned() {
+  LEARNED = new Map();
+  if (!LEARN_BILINGUAL) return;
+  const seenH = new Set(), seenN = new Set();
+  for (const r of history) {
+    if (!seenH.has(r.size)) {
+      seenH.add(r.size);
+      const parts = labelParts(r.size);
+      if (parts && sizeInfo(r.size).how === "text") { const ks = parts.map(rawTextKey).filter((k) => k !== "t"); for (let i = 1; i < ks.length; i++) unionKeys(ks[0], ks[i]); }
+    }
+    if (!seenN.has(r.item)) {
+      seenN.add(r.item);
+      const parts = labelParts(r.item);
+      if (parts) { const ks = parts.map(rawNameKey).filter(Boolean); for (let i = 1; i < ks.length; i++) unionKeys(ks[0], ks[i]); }
+    }
+  }
+}
+let headAlias = new Map();   // set on every Compare draw: their headline key -> your headline key, when only a few letters differ
 function sizeInfo(h) {
   const m = String(h ?? "").match(/\d+(?:[.,]\d+)?/);
   if (m) { const n = m[0].replace(",", "."); return SAME_SIZE[n] ? { key: SAME_SIZE[n], how: "number", aliased: true } : { key: n, how: "number" }; }
-  const words = String(h ?? "").normalize("NFKC").toLowerCase().split(/[^\p{L}\p{N}]+/u).filter(Boolean);
+  const words = wordsOf(h);
   const has = (list) => words.some((w) => list.includes(w));
-  const textKey = "t" + phraseKey(words.map(canonWord).sort()) || norm(h);       // same words, any order, any form, any language group
+  const parts = labelParts(h), raw = rawTextKey(parts ? parts[0] : h);
+  const textKey = canonKey(raw === "t" ? "t" + norm(h) : raw);                       // same words, any order, any form, any language
   if (has(LARGE_WORDS)) return { key: textKey, how: "text" };                       // not told what these mean: do not guess
   if (has(SMALL_WORDS)) return { key: SMALL_SIZE, how: "word" };
   if (has(NORMAL_WORDS)) return { key: NORMAL_SIZE, how: "word" };
@@ -1185,22 +1270,66 @@ function sizeInfo(h) {
 }
 const sizeKey = (h) => sizeInfo(h).key;
 
-// Dish names. Words that say nothing about WHICH dish are left out: "pizza", the style word "Neapolitan", and sizes ("33სმ", "33 cm"):
-// "Pizza", "პიცა" and "ნეაპოლიტანური პიცა 33სმ" are all just "a pizza"; the size comes from the headline.
+// Dish names. Words that say nothing about WHICH dish are left out: "pizza", the style word "Neapolitan", words you listed in
+// Settings ("special", "classic" ...), and sizes ("33სმ", "33 cm"): "Pizza", "პიცა" and "ნეაპოლიტანური პიცა 33სმ" are all just "a pizza".
 const NAME_FILLER = new Set(["pizza", "pizzas", "piza", "pitsa", "პიცა", "პიც", "neapolitan", "napoletana", "napoletano", "ნეაპოლიტანური", "ნეაპოლიტანულ"]);
 const SIZE_UNITS = new Set(["cm", "სმ", "см", "sm"]);
-function nameWords(name) {
+function nameTokens(name) {   // each word as written (w) and in its word-group form (c)
   const raw = String(name ?? "").normalize("NFKD").replace(/[\u0300-\u036f]/g, "").toLowerCase().split(/[^\p{L}\p{N}]+/u).filter(Boolean), out = [];
   for (let i = 0; i < raw.length; i++) {
     const w = raw[i];
     if (/^\d+(cm|სმ|см|sm)$/.test(w)) continue;                                       // "33სმ"
     if (/^\d+$/.test(w) && SIZE_UNITS.has(raw[i + 1])) { i++; continue; }            // "33" "სმ"
-    if (SIZE_UNITS.has(w) || NAME_FILLER.has(w) || NAME_FILLER.has(geoStem(w))) continue;
-    out.push(canonWord(w));
+    if (SIZE_UNITS.has(w) || NAME_FILLER.has(w) || NAME_FILLER.has(geoStem(w)) || IGNORE_WORDS.has(w) || IGNORE_WORDS.has(geoStem(w))) continue;
+    out.push({ w, c: canonWord(w) });
   }
   return out;
 }
-const nameKey = (name) => phraseKey(nameWords(name));
+const nameWords = (name) => uniqueByCode(nameTokens(name).map((t) => t.c));
+const rawNameKey = (name) => phraseKey(nameWords(name));
+const nameKey = (name) => { const parts = labelParts(name); return canonKey(rawNameKey(parts ? parts[0] : name)); };
+
+// A few letters off. Compared on the short codes, so vowel differences never count; a different consonant or a typo costs one edit.
+function levenshtein(a, b) {
+  if (a === b) return 0;
+  let prev = Array.from({ length: b.length + 1 }, (_, i) => i);
+  for (let i = 1; i <= a.length; i++) {
+    const cur = [i];
+    for (let j = 1; j <= b.length; j++) cur[j] = Math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+    prev = cur;
+  }
+  return prev[b.length];
+}
+// How many letters may differ: nothing for very short codes (Pesto / Pasta stay apart), more for longer ones.
+const editLimit = (len, level) => (level === "generous" ? (len >= 9 ? 3 : len >= 6 ? 2 : len >= 4 ? 1 : 0) : level === "careful" ? (len >= 9 ? 2 : len >= 4 ? 1 : 0) : 0);
+function nearCode(a, b, level = MATCH_LEVEL) {
+  if (!a || !b) return false;
+  if (a === b) return true;
+  return levenshtein(a, b) <= editLimit(Math.max(a.length, b.length), level);
+}
+// Per word, its short codes: from the word-group form AND as written, so a word that is in a group still matches a misspelling that is not.
+function wordCodes(name) {
+  const parts = labelParts(name), seen = new Set(), sets = [];
+  nameTokens(parts ? parts[0] : name).forEach(({ w, c }) => {
+    const codes = [...new Set([canonKey(phraseKey([c])), phraseKey([w])].filter(Boolean))], id = codes.join("|");
+    if (codes.length && !seen.has(id)) { seen.add(id); sets.push(codes); }
+  });
+  return sets;
+}
+// 0 = not alike. Otherwise higher is more alike: the whole name a few letters off, or most words alike (one name's words inside the other's).
+function nameSimilarity(a, b) {
+  if (MATCH_LEVEL === "off") return 0;
+  const ka = nameKey(a), kb = nameKey(b);
+  if (ka && kb && ka !== kb && nearCode(ka, kb)) return 0.9 - levenshtein(ka, kb) / (Math.max(ka.length, kb.length) * 10);
+  const A = wordCodes(a), B = wordCodes(b);
+  if (!A.length || !B.length) return 0;
+  let inter = 0; const used = new Set();
+  A.forEach((x) => { const j = B.findIndex((y, i) => !used.has(i) && x.some((cx) => y.some((cy) => nearCode(cx, cy)))); if (j >= 0) { used.add(j); inter++; } });
+  if (!inter) return 0;
+  const inside = inter === A.length || inter === B.length, share = inter / Math.max(A.length, B.length), jac = inter / (A.length + B.length - inter);
+  if (MATCH_LEVEL === "careful") return inside && share >= 0.5 ? 0.5 + 0.3 * share : 0;
+  return inside || jac >= 0.5 ? 0.4 + 0.3 * jac : 0;
+}
 
 // The way names and headlines were compared before the word groups. Hand links saved earlier hold keys made this way, so they still work.
 const legacyNameKey = (name) => phraseKey(String(name ?? "").normalize("NFKD").replace(/[\u0300-\u036f]/g, "").toLowerCase().split(/[^\p{L}\p{N}]+/u).filter((w) => w && !["pizza", "piza", "pitsa", "პიცა"].includes(w)).map(geoStem));
@@ -1218,7 +1347,8 @@ function compSize(comp, row) {
   const h = headLinkOf(comp, row.size);
   if (h === "!") return "!" + norm(row.size);
   if (h && !refSizeSet.has(h) && legacyHeadMap.has(h)) return legacyHeadMap.get(h);
-  return h || sizeKey(row.size);
+  const k = h || sizeKey(row.size);
+  return headAlias.get(k) || k;
 }
 
 function newestRows(restaurant, platform) {   // the latest prices for this restaurant on this app, headline by headline
@@ -1289,8 +1419,20 @@ function renderCompare() {
 
   const ref = newestRows(cmp.ref, cmp.platform);
   refSizeSet = new Set(ref.rows.map((r) => sizeKey(r.size))); legacyHeadMap = new Map(ref.rows.map((r) => [legacySizeKey(r.size), sizeKey(r.size)]));
+  headAlias = new Map();
+  if (MATCH_LEVEL !== "off") {   // their headline spelled a few letters differently from one of yours counts as that headline
+    const refTexts = [...refSizeSet].filter((k) => k.length > 1 && k[0] === "t"), seenK = new Set();
+    history.forEach((r) => {
+      if ((r.platform || "") !== cmp.platform || r.restaurant === cmp.ref) return;
+      const k = sizeInfo(r.size).key;
+      if (k.length < 2 || k[0] !== "t" || refSizeSet.has(k) || seenK.has(k)) return;
+      seenK.add(k);
+      const hits = refTexts.filter((t) => nearCode(k.slice(1), t.slice(1)));
+      if (hits.length === 1) headAlias.set(k, hits[0]);
+    });
+  }
   const heads = [...new Set(ref.rows.map((r) => r.size))].sort(naturalSort);
-  if (cmp.headline !== ALL && !heads.includes(cmp.headline)) cmp.headline = heads[0];
+  if (cmp.headline !== ALL && !heads.includes(cmp.headline)) cmp.headline = ALL;   // start with everything, not just the first headline
   heads.forEach((h) => addOption($("cmpHead"), h, h)); addOption($("cmpHead"), ALL, "All headlines"); $("cmpHead").value = cmp.headline;
   const group = cmp.headline === ALL ? ref.rows : ref.rows.filter((r) => r.size === cmp.headline);
   const groupSizes = new Set(group.map((r) => sizeKey(r.size)));
@@ -1301,7 +1443,9 @@ function renderCompare() {
   // Every other restaurant's current prices, matched to yours by name + size (or by a link you saved).
   const refNorm = norm(cmp.ref);
   const linkOf = (comp, row) => { const l = linkEntry(comp, row); return l && l.ref === refNorm ? l.item : null; };
-  const refRowOf = (size, target) => String(target).startsWith("=")   // "=pizza": a dish with an empty name code, linked by its plain name
+  const refRowOf = (size, target) => String(target).startsWith("@")   // "@<your headline>|<your item>": one of your items, in any headline
+    ? group.find((r) => norm(r.size) + "|" + norm(r.item) === target.slice(1))
+    : String(target).startsWith("=")   // "=pizza": a dish with an empty name code, linked by its plain name
     ? group.find((r) => sizeKey(r.size) === size && norm(r.item) === target.slice(1))
     : refByKey.get(size + "|" + target) || refByKey.get(legacyRef.get(size + "|" + target));   // your item a link points at
   const comps = others.filter((n) => !off.has(n)).map((name) => {
@@ -1312,15 +1456,16 @@ function renderCompare() {
       if (l === "!") return "!" + norm(row.item);
       if (!l) return sz + "|" + nameKey(row.item);
       const target = refRowOf(sz, l);
-      return target ? refKey(target) : sz + "|" + l;
+      return target ? refKey(target) : (String(l).startsWith("@") ? "@elsewhere" : sz + "|" + l);
     };
     // If several of their items point at the same one of yours, the best match wins:
     // a link you made by hand (3), then the exact same name (2), then only a similar spelling (1).
-    const best = new Map(), unmatched = [], conflicts = [];
+    const best = new Map(), unmatched = [], other = [], conflicts = [];
     cur.rows.forEach((row) => {
-      if (!groupSizes.has(compSize(name, row))) return;
-      const k = keyOf(row), mine = refByKey.get(k), l = linkOf(name, row);
-      if (!mine) { unmatched.push(row); return; }
+      const l = linkOf(name, row), explicit = !!(l && String(l).startsWith("@")), sz = compSize(name, row);
+      if (!explicit && !groupSizes.has(sz)) { if (cmp.headline === ALL && !String(sz).startsWith("!")) other.push(row); return; }   // a headline that matches none of yours: its items are listed so you can match them by hand
+      const k = keyOf(row), mine = refByKey.get(k);
+      if (!mine) { if (!explicit) unmatched.push(row); return; }   // a link to an item that is not in this view is simply not shown here
       const rank = l && l !== "!" ? 3 : norm(row.item) === norm(mine.item) ? 2 : 1, held = best.get(k);
       if (!held) best.set(k, { row, mine, rank, linked: !!(l && l !== "!") });
       else if (rank > held.rank) {   // a better match takes the place
@@ -1331,12 +1476,30 @@ function renderCompare() {
         unmatched.push(row);
       }
     });
+    if (MATCH_LEVEL !== "off") {   // names a few letters off, or sharing most of their words, are matched as a guess: shown with ≈ and a "Not the same" button
+      const taken = new Set(best.keys()), free = group.filter((r, i) => !taken.has(refKey(r)) && group.findIndex((x) => refKey(x) === refKey(r)) === i), pairs = [];
+      unmatched.forEach((row, ui) => {
+        if (linkOf(name, row)) return;   // linked or marked "not the same" by you: left alone
+        const sz = compSize(name, row);
+        free.forEach((r) => { if (sizeKey(r.size) === sz) { const score = nameSimilarity(row.item, r.item); if (score > 0) pairs.push({ ui, row, r, score }); } });
+      });
+      pairs.sort((x, y) => y.score - x.score);
+      const perRow = new Map(); pairs.forEach((q) => { const e = perRow.get(q.ui) || []; e.push(q); perRow.set(q.ui, e); });
+      const usedRef = new Set(), usedRow = new Set();
+      pairs.forEach((q) => {
+        const rk = refKey(q.r);
+        if (usedRow.has(q.ui) || usedRef.has(rk)) return;
+        if (perRow.get(q.ui).some((o) => o !== q && Math.abs(o.score - q.score) < 0.001 && refKey(o.r) !== rk)) return;   // two equally good candidates: cannot tell, so it is left for you
+        usedRow.add(q.ui); usedRef.add(rk); best.set(rk, { row: q.row, mine: q.r, rank: 1, linked: false });
+      });
+      for (let i = unmatched.length - 1; i >= 0; i--) if (usedRow.has(i)) unmatched.splice(i, 1);
+    }
     const matches = new Map(), linked = [], similar = [];
     best.forEach((m, k) => {
       matches.set(k, m.row);
       if (m.linked) linked.push(m.row); else if (m.rank === 1) similar.push({ row: m.row, mine: m.mine });
     });
-    return { name, date: cur.date, rows: cur.rows, older: cur.older, matches, unmatched, linked, similar, conflicts };
+    return { name, date: cur.date, rows: cur.rows, older: cur.older, matches, unmatched, other, linked, similar, conflicts };
   }).filter((c) => c.rows.length);
   if (!comps.length) return stop(others.every((n) => off.has(n)) ? "Tick at least one restaurant under \"Compare with\"." : `No ticked restaurant has saved prices on ${cmp.platform} yet.`);
 
@@ -1349,7 +1512,7 @@ function renderCompare() {
     count.forEach((n, headline) => {
       const l = headLinkOf(c.name, headline);
       if (l) setByHand.push({ comp: c.name, headline, target: l });
-      else if (!allRefSizes.has(sizeKey(headline))) loose.push({ comp: c.name, headline, n });
+      else if (!allRefSizes.has(headAlias.get(sizeKey(headline)) || sizeKey(headline))) loose.push({ comp: c.name, headline, n });
     });
   });
   // Sizes assumed from the wording, or counted as another size (30 -> 33), listed under the table so you can see it.
@@ -1407,21 +1570,37 @@ function renderCompare() {
     (loose.length ? ` ${new Set(loose.map((x) => x.comp)).size} restaurant(s) have headlines that do not match yours: their items are left out until you link them (see below).` : "") +
     (comps.length > cols.length ? ` No matching items: ${comps.filter((c) => !c.matches.size).map((c) => c.name).join(", ")}.` : "");
 
-  // Items with no match: pick the same dish in your list, once, and it is remembered.
-  const linkValue = (r) => nameKey(r.item) || "=" + norm(r.item);   // an empty value would mean "remove the link"
-  const mine = [...new Map(group.map((r) => [linkValue(r), r.item])).entries()];
-  const unmatched = comps.flatMap((c) => c.unmatched.map((row) => ({ comp: c.name, row })));
+  // Items with no match: pick the same dish of yours (any headline) once, and it is remembered.
+  const multiHead = new Set(group.map((r) => r.size)).size > 1;
+  const pickList = new Map();   // what you see in the list -> the link it makes
+  [...group].sort((x, y) => naturalSort(x.size, y.size) || naturalSort(x.item, y.item)).forEach((r) => { const label = multiHead ? `${r.size} · ${r.item}` : r.item; if (!pickList.has(label)) pickList.set(label, "@" + norm(r.size) + "|" + norm(r.item)); });
+  const dl = $("cmpAllMine"); dl.innerHTML = ""; pickList.forEach((_, label) => { const o = document.createElement("option"); o.value = label; dl.appendChild(o); });
+  const unmatched = comps.flatMap((c) => [...c.unmatched, ...c.other].map((row) => ({ comp: c.name, row })));
+  cmpState = { unmatched: unmatched.filter(({ comp, row }) => linkOf(comp, row) !== "!"), pickList };   // for the "Match the rest with Claude" button
   $("cmpUnmatched").hidden = !unmatched.length;
-  $("cmpUnmatchedSum").textContent = `Not matched yet (${unmatched.length})`;
+  $("cmpUnmatchedSum").textContent = `Not matched yet (${unmatched.length}): match them by hand`;
   const ut = $("cmpUnTable"); ut.innerHTML = "";
-  const uh = ut.createTHead().insertRow(); ["Restaurant", "Item", "Price", `Same as which of ${cmp.ref}'s items?`].forEach((h) => { const th = document.createElement("th"); th.textContent = h; uh.appendChild(th); });
+  const uh = ut.createTHead().insertRow(); ["Restaurant", "Their headline", "Item", "Price", `Same as which of ${cmp.ref}'s items?`].forEach((h) => { const th = document.createElement("th"); th.textContent = h; uh.appendChild(th); });
   const ub = ut.createTBody();
   unmatched.forEach(({ comp, row }) => {
-    const tr = ub.insertRow(); tr.insertCell().textContent = comp; tr.insertCell().textContent = row.item; tr.insertCell().textContent = money(comparePrice(row));
-    const sel = document.createElement("select"); addOption(sel, "", "— not the same —"); mine.forEach(([n, label]) => addOption(sel, n, label));
-    sel.onchange = () => saveLink(comp, row, sel.value);
-    tr.insertCell().appendChild(sel);
+    const tr = ub.insertRow(); tr.insertCell().textContent = comp; tr.insertCell().textContent = row.size; tr.insertCell().textContent = row.item; tr.insertCell().textContent = money(comparePrice(row));
+    tr.dataset.filter = `${comp} ${row.size} ${row.item}`.toLowerCase();
+    const cell = tr.insertCell();
+    if (linkOf(comp, row) === "!") {
+      const t = document.createElement("span"); t.className = "muted"; t.textContent = "marked: not the same "; cell.appendChild(t);
+      const undo = document.createElement("button"); undo.className = "secondary small"; undo.textContent = "Undo"; undo.onclick = () => saveLink(comp, row, ""); cell.appendChild(undo);
+      return;
+    }
+    const input = document.createElement("input"); input.setAttribute("list", "cmpAllMine"); input.placeholder = "type or pick your item…"; input.autocomplete = "off";
+    input.onchange = () => {
+      const v = input.value.trim(); if (!v) return;
+      const hit = pickList.get(v) || [...pickList].find(([label]) => label.toLowerCase() === v.toLowerCase());
+      if (hit) saveLink(comp, row, Array.isArray(hit) ? hit[1] : hit); else { input.value = ""; input.placeholder = "pick one from the list"; }
+    };
+    const no = document.createElement("button"); no.className = "secondary small"; no.textContent = "Not the same"; no.onclick = () => saveLink(comp, row, "!");
+    cell.append(input, no);
   });
+  applyUnFilter();
   $("cmpHeads").hidden = !loose.length && !setByHand.length;
   $("cmpHeadsSum").textContent = `Headlines that do not match yours (${loose.length})` + (setByHand.length ? ` · set by hand (${setByHand.length})` : "");
   const ht = $("cmpHeadTable"); ht.innerHTML = "";
@@ -1472,8 +1651,70 @@ function renderCompare() {
     const x = document.createElement("button"); x.className = "secondary small"; x.textContent = "Unlink"; x.onclick = () => saveLink(comp, row, ""); box.appendChild(x);
     list.appendChild(box);
   });
+  restoreOpen();
 }
 
+let cmpState = null, aiSuggestions = [], aiBusy = false;
+const aiStatus = (text, cls) => { $("cmpAIStatus").textContent = text; $("cmpAIStatus").className = cls || "muted"; };
+function renderAI() {   // the suggestions Claude made, each to be checked by you
+  const box = $("cmpAI"); box.innerHTML = "";
+  if (!aiSuggestions.length) return;
+  const head = document.createElement("div"); head.className = "linkRow";
+  const t = document.createElement("strong"); t.textContent = `Claude suggests ${aiSuggestions.length} match(es). Nothing is saved until you apply them.`; head.appendChild(t);
+  const all = document.createElement("button"); all.className = "small"; all.textContent = `Apply all ${aiSuggestions.length}`; all.onclick = () => applyAI([...aiSuggestions]); head.appendChild(all);
+  const none = document.createElement("button"); none.className = "secondary small"; none.textContent = "Dismiss all"; none.onclick = () => { aiSuggestions = []; renderAI(); }; head.appendChild(none);
+  box.appendChild(head);
+  aiSuggestions.forEach((sg) => {
+    const line = document.createElement("div"); line.className = "linkRow";
+    const text = document.createElement("span"); text.textContent = `${sg.comp} · ${sg.row.size} · ${sg.row.item}  ≈  ${sg.label}`; line.appendChild(text);
+    const ok = document.createElement("button"); ok.className = "secondary small"; ok.textContent = "Apply"; ok.onclick = () => applyAI([sg]); line.appendChild(ok);
+    const no = document.createElement("button"); no.className = "secondary small"; no.textContent = "Not the same"; no.onclick = () => { aiSuggestions = aiSuggestions.filter((x) => x !== sg); renderAI(); }; line.appendChild(no);
+    box.appendChild(line);
+  });
+}
+async function applyAI(list) {
+  const mySession = session;
+  try {
+    for (const sg of list) {
+      links = (await api("links", { action: "set", comp: norm(sg.comp), item: norm(sg.row.item) + "|" + compSize(sg.comp, sg.row), ref: norm(cmp.ref), target: sg.target })).links || {};
+      if (mySession !== session) return;
+    }
+  } catch (e) { alert(e.message); }
+  aiSuggestions = aiSuggestions.filter((x) => !list.includes(x)); renderAI(); renderCompare();
+}
+$("cmpAIBtn").onclick = async () => {
+  if (aiBusy || !cmpState) return;
+  const labels = [...cmpState.pickList.keys()], byComp = new Map();
+  cmpState.unmatched.forEach(({ comp, row }) => { if (!byComp.has(comp)) byComp.set(comp, []); byComp.get(comp).push(row); });
+  if (!byComp.size) return aiStatus("Nothing is waiting to be matched.", "muted");
+  if (labels.length > 150) return aiStatus(`Your menu has ${labels.length} items here, which is too many for one go. Choose one of your headlines above first (150 items at most).`, "err");
+  const total = [...byComp.values()].reduce((n, r) => n + r.length, 0);
+  if (!confirm(`Send ${labels.length} of your item names and ${total} of theirs to Claude to suggest matches?\n\nIt costs a few cents. Nothing is saved until you check and apply each suggestion.`)) return;
+  aiBusy = true; $("cmpAIBtn").disabled = true; aiSuggestions = []; renderAI();
+  const mySession = session; const problems = []; let n = 0;
+  for (const [comp, rows] of byComp) {
+    for (let i = 0; i < rows.length; i += 150) {
+      const chunk = rows.slice(i, i + 150);
+      aiStatus(`Asking Claude about ${comp}…`);
+      try {
+        const out = await api("aimatch", { mine: labels, theirs: chunk.map((r) => `${r.size} · ${r.item}`) });
+        if (mySession !== session) return;
+        for (const pr of out.pairs || []) { const label = labels[pr.mine], target = cmpState.pickList.get(label); if (target && chunk[pr.their]) { aiSuggestions.push({ comp, row: chunk[pr.their], label, target }); n++; } }
+      } catch (e) { if (e.message === "Wrong password") return; problems.push(`${comp}: ${e.message}`); }
+    }
+  }
+  aiBusy = false; $("cmpAIBtn").disabled = false; renderAI();
+  aiStatus(n ? `Claude found ${n} possible match(es). Check them below.` : "Claude found no confident matches." , problems.length ? "err" : "muted");
+  if (problems.length) aiStatus((n ? `Claude found ${n} possible match(es). ` : "") + "⚠ " + problems.join(" · "), "err");
+};
+function applyUnFilter() {   // the filter box above the "Not matched yet" table
+  const q = ($("cmpUnFilter").value || "").trim().toLowerCase();
+  document.querySelectorAll("#cmpUnTable tbody tr").forEach((tr) => { tr.hidden = !!q && !(tr.dataset.filter || "").includes(q); });
+}
+$("cmpUnFilter").oninput = applyUnFilter;
+const cmpOpen = {};   // which lists under the table you left open
+document.querySelectorAll("details.cmpMore").forEach((d) => d.addEventListener("toggle", () => { cmpOpen[d.id] = d.open; }));
+function restoreOpen() { ["cmpUnmatched", "cmpHeads", "cmpSimilar", "cmpLinked"].forEach((id) => { const want = id in cmpOpen ? cmpOpen[id] : (id === "cmpUnmatched" || id === "cmpHeads"); if ($(id).open !== want) $(id).open = want; }); }
 async function saveHeadLink(comp, headline, target) {   // headline links live in the same saved list, under a "~" key
   try { links = (await api("links", { action: "set", comp: norm(comp), item: "~" + norm(headline), ref: norm(cmp.ref), target })).links || {}; renderCompare(); }
   catch (e) { alert(e.message); renderCompare(); }
