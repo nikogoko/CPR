@@ -63,7 +63,7 @@ export default async (req) => {
 
     const wb = new ExcelJS.Workbook();
     wb.creator = "Price Tracker";
-    const used = new Set(["all data"]);
+    const used = new Set(["all data", "history"]);   // "History" is a name Excel keeps for itself: a restaurant with that name becomes "History (2)"
 
     // Sheet 1: every saved row (filters on, header frozen), newest date first within each restaurant.
     const all = wb.addWorksheet("All data", { views: [{ state: "frozen", ySplit: 1 }] });
@@ -83,8 +83,8 @@ export default async (req) => {
     for (const rec of records) {
       const sorted = [...rec.rows].sort((a, b) => compareSnapshots(b.date, a.date));
       for (const r of sorted) {
-        const added = all.addRow({ restaurant: rec.name, platform: platformLabel(platformOf(r)), date: snapshotToDate(r.date), item: r.item, size: r.size, sale: asNum(r.sale_price), reg: asNum(r.regular_price), notes: r.notes, popular: r.popular ? "Yes" : "", isNew: r.isNew ? "Yes" : "", age18: r.age18 ? "Yes" : "" });
-        added.getCell("date").numFmt = snapshotHasTime(r.date) ? "d mmmm yyyy hh:mm" : "d mmmm yyyy";   // an automatic fetch shows its time
+        const added = all.addRow({ restaurant: rec.name, platform: platformLabel(platformOf(r)), date: isValidSnapshot(r.date) ? snapshotToDate(r.date) : String(r.date ?? ""), item: r.item, size: r.size, sale: asNum(r.sale_price), reg: asNum(r.regular_price), notes: r.notes, popular: r.popular ? "Yes" : "", isNew: r.isNew ? "Yes" : "", age18: r.age18 ? "Yes" : "" });
+        if (isValidSnapshot(r.date)) added.getCell("date").numFmt = snapshotHasTime(r.date) ? "d mmmm yyyy hh:mm" : "d mmmm yyyy";   // a date with an hour shows it; an entry whose date is not a real date (old data) is written as plain text
         added.getCell("date").alignment = { horizontal: "left" };   // dates are right-aligned by default and would touch the item name
       }
     }

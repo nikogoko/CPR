@@ -113,6 +113,13 @@ index line chart, and yellow cells meaning "price changed since yesterday").
 
 **Login**: the password always works. Optional Face ID / fingerprint (passkeys) set up after a password login; lasts 12 hours; works only on the exact website address it was set up on.
 
+**Third review round (latest)**
+- Hand links are saved per "your restaurant": key `comp|item|size|ref` (older `comp|item|size` and `comp|item` still read when their stored ref matches; unlinking deletes every form). Link saves are queued one after another. Claude suggestions remember the restaurant, ref and size they were made for; changing "your restaurant" clears them; failed applies stay in the list.
+- Matching core: digits are never collapsed (330 ml is not 300 ml), volumes/weights are normalised (0.33 L = 330 ml, Russian units too), learned equivalences keep one word per language per group, headline sizes need cm/სმ or a plausible 10-100 pizza number.
+- Excel: sheet names are always legal and unique ("History" and "All data" are reserved); an invalid saved date becomes text instead of corrupting the file; date column is wide and left-aligned.
+- Server: the automatic fetch never overwrites a price saved by hand; prices like "1e5", "28-30", 100000+ are refused; the history reply is cut below 4.8 MB (oldest automatic rows hidden, page tells you, nothing deleted); `aimatch` takes at most 60 of their items, 1500 output tokens, and ignores instructions inside the lists.
+- Not done (low value, decide later): a "keep automatic days" setting (fixed 30), merging new built-in word groups when a stale page saves settings, passkey challenge flood limit.
+
 ## 8. Known risks (never verified live)
 - Nothing was ever run against the real Claude API, real Netlify Blobs, a real Glovo/Wolt screenshot, or a real phone with Face ID. The owner's first real use is the real test.
 - Not measured: how long reading ~20 Georgian items takes versus Netlify's function time limit; if it times out, split big screenshots into pieces.

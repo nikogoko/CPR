@@ -51,6 +51,7 @@
   .dl select { max-width: 280px; }
   .foot { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: center; padding: 6px 0 26px; }
   button.small { padding: 7px 14px; font-size: .85rem; }
+  @media (pointer: coarse) { button.small { min-height: 40px; padding-top: 9px; padding-bottom: 9px; } }   /* fingers need a bigger target */
   #login .or { margin: 4px 0 14px; font-size: .85rem; }
   #faceBtn { margin-bottom: 4px; }
   #dlStatus:empty { display: none; }   /* no empty gap beside the button */
@@ -487,7 +488,7 @@ function backToLogin(msg) {
   session++; clearTimeout(saveTimer); saveTimer = null; fetchStop = true; busy = "";   // stop anything still going
   aiBusy = false; aiSuggestions = []; cmpState = null; $("cmpAIBtn").disabled = false; renderAI();   // a Claude request that was under way is dropped
   delete $("fetchBtn").dataset.running; $("fetchBtn").textContent = "⬇ Fetch prices"; syncButtons();
-  data = []; history = []; links = {}; showBad = false; try { render(); } catch { /* the page is hiding anyway */ }
+  data = []; history = []; links = {}; linksLoaded = false; showBad = false; try { render(); } catch { /* the page is hiding anyway */ }
   $("pw").value = "";
   password = ""; authToken = ""; sessionStorage.removeItem("pw"); sessionStorage.removeItem("token");
   $("app").hidden = true; $("login").hidden = false; $("loginMsg").textContent = msg;
@@ -620,7 +621,7 @@ function buildScheduleControls() {
 }
 function fillSchedule(sc) {
   buildScheduleControls();
-  const hours = sc.hours || (sc.hour !== undefined ? [sc.hour] : [6]);
+  const hours = sc.hours && sc.hours.length ? sc.hours : (sc.hour !== undefined ? [sc.hour] : [6]);
   $("setAuto").checked = sc.enabled; $("setHour").value = hours[0]; $("setHour2").value = hours[1] ?? "";
   document.querySelectorAll(".setDay").forEach((c) => { c.checked = sc.days.includes(Number(c.value)); });
 }
@@ -796,7 +797,7 @@ const chosenRestaurant = () => ($("rest").value === NEW ? $("newRest").value.tri
 
 /* ---------- saved history ---------- */
 async function loadHistory() {
-  try { history = (await api("history", { action: "read" })).rows; rebuildLearned(); }
+  try { const h = await api("history", { action: "read" }); history = h.rows; rebuildLearned(); if (h.hidden) alert(`The saved history is very large, so ${h.hidden} of the oldest automatic prices are left out of this view (nothing was deleted).`); }
   catch (e) { setStatus("Could not load saved prices: " + e.message, "err"); }
   if (isRestaurantView() && !restaurantsSaved().includes(view)) view = "add";
   renderTabs(); fillRestaurantSelect(); showView();
@@ -1087,7 +1088,7 @@ $("readBtn").onclick = async () => {
       platform = lastPlatform; guess = true; assumeReason = "same as your last batch";
     } else unsure.push(name);                      // mixed apps in one batch, or no clue at all: leave it blank
     if (guess) (assumed[platform] = assumed[platform] || []).push(name);
-    for (const it of out.items) {
+    for (const it of (Array.isArray(out.items) ? out.items : [])) {
       const row = { restaurant, platform, item: it.item || "", size: it.size || "", sale_price: it.sale_price || "", regular_price: it.regular_price || "", notes: it.notes || "", popular: it.popular === true, isNew: it.isNew === true, age18: it.age18 === true };
       if (guess) row.platformAssumed = true;       // shown with a yellow outline until you confirm or change it
       if (isDup(row)) dups++; else { data.push(row); added++; }
@@ -1126,7 +1127,9 @@ $("saveBtn").onclick = async () => {
     justSaved = sending.map((r) => ({ ...r, date: day }));
     let saved = 0, replaced = 0;
     for (let i = 0; i < justSaved.length; i += 500) {      // the server takes 500 rows at a time
+      if (mySession !== session) return;   // logged out meanwhile: nothing more is sent
       const part = await api("save", { rows: justSaved.slice(i, i + 500) });
+      if (mySession !== session) return;
       saved += part.saved; replaced += part.replaced;
     }
     saveOk = true;
@@ -1205,17 +1208,17 @@ function phraseKey(words) {
   const latin = words.join("").replace(/[\u10d0-\u10f0]/g, (c) => GEO[c] || "")
     .replace(/ph/g, "f").replace(/gh/g, "g").replace(/ck/g, "k").replace(/[cq]/g, "k").replace(/w/g, "v").replace(/y/g, "i").replace(/x/g, "ks")
     .replace(/kh/g, "k").replace(/sh/g, "s").replace(/zh/g, "z").replace(/th/g, "t").replace(/z/g, "s");
-  const skeleton = latin.replace(/[aeiou]/g, "").replace(/(.)\1+/g, "$1");
-  return skeleton.length >= 3 ? skeleton : latin.replace(/(.)\1+/g, "$1");   // very short names keep their vowels, so "Ai" and "Oi" stay different
+  const skeleton = latin.replace(/[aeiou]/g, "").replace(/([^\d])\1+/g, "$1");   // doubled LETTERS count once; digits never do (330 and 300 differ)
+  return skeleton.length >= 3 ? skeleton : latin.replace(/([^\d])\1+/g, "$1");   // very short names keep their vowels, so "Ai" and "Oi" stay different
 }
 // ---- Labels written in two languages: "სასმელები / drinks", "მარგარიტა (Margherita)". Both parts say the same thing. ----
 const SCRIPTS = [["geo", /[\u10d0-\u10ff]/], ["cyr", /[\u0400-\u04ff]/], ["lat", /[a-z]/i]];
 const scriptOf = (part) => { const found = SCRIPTS.filter(([, re]) => re.test(part)).map(([n]) => n); return found.length === 1 ? found[0] : ""; };
 function labelParts(label) {   // the parts of a label that says one thing in several languages, or null for any other label
   const text = String(label ?? "");
-  if (!/[\/|(]/.test(text)) return null;
+  if (text.length > 200 || !/[\/|(]/.test(text)) return null;
   let parts = text.split(/\s*[\/|]\s*/);
-  if (parts.length < 2) { const m = text.match(/^(.*?)\s*\((.+)\)\s*$/); if (m) parts = [m[1], m[2]]; }
+  if (parts.length < 2) { const t = text.trimEnd(), open = t.lastIndexOf("("); if (t.endsWith(")") && open > 0) parts = [t.slice(0, open), t.slice(open + 1, -1)]; }   // "A (B)"
   parts = parts.map((p) => p.trim()).filter(Boolean);
   if (parts.length < 2 || parts.some((p) => p.split(/\s+/).length > 5)) return null;
   const scripts = parts.map(scriptOf);
@@ -1224,36 +1227,54 @@ function labelParts(label) {   // the parts of a label that says one thing in se
 }
 // What the page has learned from your own data: every bilingual label tells that its parts mean the same, so
 // "სასმელები / drinks" teaches that "drinks" and სასმელები are one thing (a union-find over the keys). Switched on or off in Settings.
-let LEARNED = new Map(), LEARN_BILINGUAL = true, IGNORE_WORDS = new Set(), MATCH_LEVEL = "careful";   // MATCH_LEVEL: off | careful | generous
+let LEARNED = new Map(), LEARNED_SCRIPTS = new Map(), LEARN_BILINGUAL = true, IGNORE_WORDS = new Set(), MATCH_LEVEL = "careful";   // MATCH_LEVEL: off | careful | generous
 function rootOf(k) {
   let r = k; while (LEARNED.has(r)) r = LEARNED.get(r);
   let c = k; while (LEARNED.has(c)) { const n = LEARNED.get(c); LEARNED.set(c, r); c = n; }
   return r;
 }
 const canonKey = (k) => (LEARNED.size ? rootOf(k) : k);
-function unionKeys(a, b) { const ra = rootOf(a), rb = rootOf(b); if (ra !== rb) { if (ra < rb) LEARNED.set(rb, ra); else LEARNED.set(ra, rb); } }
+// Joins two keys that were found together in one label. A learned group may hold only ONE word per language (one Georgian, one English,
+// one Russian); a join that would put two English words in one group is refused, so a label like "ცეზარი (Shrimp)" can never make Chicken = Shrimp.
+function unionKeys(a, sa, b, sb) {
+  const ra = rootOf(a), rb = rootOf(b);
+  if (ra === rb) return;
+  const A = LEARNED_SCRIPTS.get(ra) || { [sa]: new Set([a]) }, B = LEARNED_SCRIPTS.get(rb) || { [sb]: new Set([b]) };
+  const merged = {};
+  for (const sc of new Set([...Object.keys(A), ...Object.keys(B)])) {
+    const u = new Set([...(A[sc] || []), ...(B[sc] || [])]);
+    if (u.size > 1) return;
+    merged[sc] = u;
+  }
+  const root = ra < rb ? ra : rb, child = ra < rb ? rb : ra;
+  LEARNED.set(child, root); LEARNED_SCRIPTS.set(root, merged); LEARNED_SCRIPTS.delete(child);
+}
 const wordsOf = (text) => String(text ?? "").normalize("NFKC").toLowerCase().split(/[^\p{L}\p{N}]+/u).filter(Boolean);
 // The same word written in two languages in one label should count once.
-function uniqueByCode(words) {
-  const seen = new Set(), out = [];
-  for (const w of words) { const c = phraseKey([w]); if (c && seen.has(c)) continue; if (c) seen.add(c); out.push(w); }
+function uniqueByCode(items) {   // items: { w: the word as written, c: its word-group form }
+  const seen = new Map(), out = [];
+  for (const it of items) {
+    const c = phraseKey([it.c]);
+    if (c) { const prev = seen.get(c); if (prev && (prev.w === it.w || scriptOf(prev.w) !== scriptOf(it.w))) continue; if (!prev) seen.set(c, it); }
+    out.push(it);
+  }
   return out;
 }
-const rawTextKey = (text) => "t" + phraseKey(uniqueByCode(wordsOf(text).map(canonWord)).sort());   // headline words: any order, any form, any language group
+const rawTextKey = (text) => "t" + phraseKey(uniqueByCode(wordsOf(text).map((w) => ({ w, c: canonWord(w) }))).map((x) => x.c).sort());   // headline words: any order, any form, any language group
 function rebuildLearned() {
-  LEARNED = new Map(); clearKeyCaches();
+  LEARNED = new Map(); LEARNED_SCRIPTS = new Map(); clearKeyCaches();
   if (!LEARN_BILINGUAL) return;
   const seenH = new Set(), seenN = new Set();
   for (const r of history) {
     if (!seenH.has(r.size)) {
       seenH.add(r.size);
       const parts = labelParts(r.size);
-      if (parts && sizeInfo(r.size).how === "text") { const ks = parts.map(rawTextKey).filter((k) => k !== "t"); for (let i = 1; i < ks.length; i++) unionKeys(ks[0], ks[i]); }
+      if (parts && sizeInfo(r.size).how === "text") { const ks = parts.map((x) => ({ k: rawTextKey(x), sc: scriptOf(x) })).filter((x) => x.k !== "t"); for (let i = 1; i < ks.length; i++) unionKeys(ks[0].k, ks[0].sc, ks[i].k, ks[i].sc); }
     }
     if (!seenN.has(r.item)) {
       seenN.add(r.item);
       const parts = labelParts(r.item);
-      if (parts) { const ks = parts.map(rawNameKey).filter(Boolean); for (let i = 1; i < ks.length; i++) unionKeys(ks[0], ks[i]); }
+      if (parts) { const ks = parts.map((x) => ({ k: rawNameKey(x), sc: scriptOf(x) })).filter((x) => x.k); for (let i = 1; i < ks.length; i++) unionKeys(ks[0].k, ks[0].sc, ks[i].k, ks[i].sc); }
     }
   }
   clearKeyCaches();   // what was analysed while learning used a half-built picture
@@ -1265,9 +1286,16 @@ const clearKeyCaches = () => Object.values(KEYCACHE).forEach((m) => m.clear());
 const cached = (store, key, make) => { let v = store.get(key); if (v === undefined) { v = make(); store.set(key, v); } return v; };
 let headAlias = new Map();   // set on every Compare draw: their headline key -> your headline key, when only a few letters differ
 function sizeInfoRaw(h) {
-  const m = String(h ?? "").match(/\d+(?:[.,]\d+)?/);
-  if (m) { const n = m[0].replace(",", "."); return SAME_SIZE[n] ? { key: SAME_SIZE[n], how: "number", aliased: true } : { key: n, how: "number" }; }
   const words = wordsOf(h);
+  const plain = words.filter((w) => !/\d/.test(w) && !SIZE_UNITS.has(w));
+  const aboutPizza = plain.length === 0 || plain.some((w) => NORMAL_WORDS.includes(w) || SMALL_WORDS.includes(w) || LARGE_WORDS.includes(w) || NAME_FILLER.has(w) || NAME_FILLER.has(geoStem(w)));
+  let withUnit = null, plausible = null;
+  for (const m of String(h ?? "").matchAll(/(\d+(?:[.,]\d+)?)(\s*(?:cm|სმ|см|sm)(?![\p{L}\p{N}]))?/giu)) {
+    if (m[2] && withUnit === null) withUnit = m[1];
+    else if (!m[2] && plausible === null && aboutPizza && parseFloat(m[1].replace(",", ".")) >= 10 && parseFloat(m[1].replace(",", ".")) <= 100) plausible = m[1];
+  }
+  const found = withUnit ?? plausible;
+  if (found !== null) { const n = found.replace(",", "."); return SAME_SIZE[n] ? { key: SAME_SIZE[n], how: "number", aliased: true } : { key: n, how: "number" }; }
   const has = (list) => words.some((w) => list.includes(w));
   const parts = labelParts(h), raw = rawTextKey(parts ? parts[0] : h);
   const textKey = canonKey(raw === "t" ? "t" + norm(h) : raw);                       // same words, any order, any form, any language
@@ -1284,14 +1312,14 @@ const sizeKey = (h) => sizeInfo(h).key;
 const NAME_FILLER = new Set(["pizza", "pizzas", "piza", "pitsa", "პიცა", "პიც", "neapolitan", "napoletana", "napoletano", "ნეაპოლიტანური", "ნეაპოლიტანულ"]);
 const SIZE_UNITS = new Set(["cm", "სმ", "см", "sm"]);
 // "330 მლ", "330ml", "0.33 L", "0,5l", "200 გრ", "1 kg" become one token ("vol330ml", "vol500ml", "wt200g"): the same amount matches however it is written, a different amount does not.
-const MEASURE_RE = /(\d+(?:[.,]\d+)?)\s*(ml|მლ|мл|cl|ლიტრი|ლიტრ|ლტ|l|ლ|kg|კგ|კილო|gr|გრამი|გრ|g|გ)(?![\p{L}\p{N}])/giu;
+const MEASURE_RE = /(\d+(?:[.,]\d+)?)\s*(ml|მლ|мл|cl|ლიტრი|ლიტრ|ლტ|л|l|ლ|kg|კგ|кг|კილო|gr|გრამი|გრ|гр|g|გ|г)(?![\p{L}\p{N}])/giu;
 function normMeasures(text) {
   return text.replace(MEASURE_RE, (m, num, unit) => {
     const n = parseFloat(num.replace(",", ".")), u = unit.toLowerCase();
     if (/^(ml|მლ|мл)$/.test(u)) return ` vol${Math.round(n)}ml `;
     if (/^cl$/.test(u)) return ` vol${Math.round(n * 10)}ml `;
-    if (/^(l|ლ|ლიტრი|ლიტრ|ლტ)$/.test(u)) return ` vol${Math.round(n * 1000)}ml `;
-    if (/^(g|gr|გრ|გრამი|გ)$/.test(u)) return ` wt${Math.round(n)}g `;
+    if (/^(l|ლ|ლიტრი|ლიტრ|ლტ|л)$/.test(u)) return ` vol${Math.round(n * 1000)}ml `;
+    if (/^(g|gr|გრ|გრამი|გ|г|гр)$/.test(u)) return ` wt${Math.round(n)}g `;
     return ` wt${Math.round(n * 1000)}g `;
   });
 }
@@ -1306,7 +1334,7 @@ function nameTokens(name) {   // each word as written (w) and in its word-group 
   }
   return out;
 }
-const nameWords = (name) => uniqueByCode(nameTokens(name).map((t) => t.c));
+const nameWords = (name) => uniqueByCode(nameTokens(name)).map((t) => t.c);
 const rawNameKey = (name) => phraseKey(nameWords(name));
 const nameKeyRaw = (name) => { const parts = labelParts(name); return canonKey(rawNameKey(parts ? parts[0] : name)); };
 const nameKey = (name) => cached(KEYCACHE.name, String(name ?? ""), () => nameKeyRaw(name));
@@ -1327,7 +1355,10 @@ const editLimit = (len, level) => (level === "generous" ? (len >= 9 ? 3 : len >=
 function nearCode(a, b, level = MATCH_LEVEL) {
   if (!a || !b) return false;
   if (a === b) return true;
-  return levenshtein(a, b) <= editLimit(Math.max(a.length, b.length), level);
+  if (/\d/.test(a) || /\d/.test(b)) return false;   // an amount or a number (330 ml, 4) must be exactly the same
+  const limit = editLimit(Math.max(a.length, b.length), level);
+  if (!limit || Math.abs(a.length - b.length) > limit) return false;
+  return levenshtein(a, b) <= limit;
 }
 // Per word, its short codes: from the word-group form AND as written, so a word that is in a group still matches a misspelling that is not.
 function wordCodesRaw(name) {
@@ -1372,9 +1403,13 @@ const naturalSort = (a, b) => a.localeCompare(b, undefined, { numeric: true });
 
 // Headline links share the same saved list as item links; their key starts with "~" (item names never contain it).
 // A link is saved per size ("Margherita" at 33 is not "Margherita" at 25). Links saved earlier had no size and still apply to every size.
-const linkKeyOf = (comp, row) => norm(comp) + "|" + norm(row.item) + "|" + compSize(comp, row);
-const linkEntry = (comp, row) => links[linkKeyOf(comp, row)] || links[norm(comp) + "|" + norm(row.item)];
-const headLinkOf = (comp, headline) => { const l = links[norm(comp) + "|~" + norm(headline)]; return l && l.ref === norm(cmp.ref) ? l.item : null; };
+// A link belongs to ONE reference restaurant ("your restaurant" in Compare), one size, one of their items. Older links were saved
+// without the reference in the key, or without the size: they are still found (the reference stored inside must be the current one).
+const itemLinkKeys = (comp, row) => { const c = norm(comp), it = norm(row.item), sz = compSize(comp, row); return [`${c}|${it}|${sz}|${norm(cmp.ref)}`, `${c}|${it}|${sz}`, `${c}|${it}`]; };
+const headLinkKeys = (comp, headline) => { const c = norm(comp), h = "~" + norm(headline); return [`${c}|${h}|${norm(cmp.ref)}`, `${c}|${h}`]; };
+const foundLinks = (keys) => keys.filter((k) => links[k] && links[k].ref === norm(cmp.ref));   // the keys that hold a link for the current reference
+const linkEntry = (comp, row) => { const k = foundLinks(itemLinkKeys(comp, row))[0]; return k ? links[k] : undefined; };
+const headLinkOf = (comp, headline) => { const k = foundLinks(headLinkKeys(comp, headline))[0]; return k ? links[k].item : null; };
 // The size a competitor's row counts as: your choice for its headline, else the number in the headline. "!" = left out on purpose.
 let refSizeSet = new Set(), legacyHeadMap = new Map();   // set on every Compare draw: your headlines' size keys, and the older form of them (for links saved before the word groups)
 function compSize(comp, row) {
@@ -1612,10 +1647,12 @@ function renderCompare() {
   const dl = $("cmpAllMine"); dl.innerHTML = ""; pickList.forEach((_, label) => { const o = document.createElement("option"); o.value = label; dl.appendChild(o); });
   const unmatched = comps.flatMap((c) => [...c.unmatched, ...c.other].map((row) => ({ comp: c.name, row })));
   // A suggestion for an item with no match: the one of yours whose name is most alike, in a headline that could hold it. Only a suggestion.
-  const suggestFor = (row) => {
+  const matchedOf = new Map(comps.map((c) => [c.name, new Set(c.matches.keys())]));   // which of your items each restaurant already has a match for
+  const suggestFor = (comp, row) => {
     if (MATCH_LEVEL === "off") return null;
     let best = null, tie = false;
     pickRows.forEach((r, label) => {
+      if (matchedOf.get(comp).has(refKey(r))) return;   // already matched (for example by the exact name): a suggestion would push that match out
       if (!headlinesCompatible(row.size, r.size)) return;
       const sc = nameSimilarity(row.item, r.item);
       if (sc <= 0) return;
@@ -1623,8 +1660,8 @@ function renderCompare() {
     });
     return best && !tie ? best : null;
   };
-  const suggestions = [];
-  cmpState = { unmatched: unmatched.filter(({ comp, row }) => linkOf(comp, row) !== "!"), pickList };   // for the "Match the rest with Claude" button
+  const suggestions = [], usedTargets = new Set();
+  cmpState = { unmatched: unmatched.filter(({ comp, row }) => linkOf(comp, row) !== "!"), pickList, matchedOf, pickKey: new Map([...pickRows].map(([label, r]) => [label, refKey(r)])) };   // for the "Match the rest with Claude" button
   $("cmpUnmatched").hidden = !unmatched.length;
   $("cmpUnmatchedSum").textContent = `Not matched yet (${unmatched.length}): match them by hand`;
   const ut = $("cmpUnTable"); ut.innerHTML = "";
@@ -1645,14 +1682,16 @@ function renderCompare() {
       const hit = pickList.get(v) || [...pickList].find(([label]) => label.toLowerCase() === v.toLowerCase());
       if (hit) saveLink(comp, row, Array.isArray(hit) ? hit[1] : hit); else { input.value = ""; input.placeholder = "pick one from the list"; }
     };
-    const no = document.createElement("button"); no.className = "secondary small"; no.textContent = "Not the same"; no.onclick = () => saveLink(comp, row, "!");
+    input.setAttribute("aria-label", `Same as which of ${cmp.ref}'s items? For ${comp}: ${row.item}`);
+    const no = document.createElement("button"); no.className = "secondary small"; no.textContent = "Not the same"; no.setAttribute("aria-label", `Not the same: ${comp} ${row.item}`); no.onclick = () => saveLink(comp, row, "!");
     cell.append(input, no);
-    const sg = suggestFor(row);
-    if (sg) {
-      const target = pickList.get(sg.label), line = document.createElement("div"); line.className = "muted";
+    const sg = suggestFor(comp, row), target = sg && pickList.get(sg.label);
+    if (sg && !usedTargets.has(comp + "|" + target)) {
+      usedTargets.add(comp + "|" + target);   // two of their items are never suggested for the same item of yours
+      const line = document.createElement("div"); line.className = "muted";
       line.textContent = `Maybe: ${sg.label} `;
-      const yes = document.createElement("button"); yes.className = "secondary small"; yes.textContent = "Yes, same"; yes.onclick = () => saveLink(comp, row, target);
-      line.appendChild(yes); cell.appendChild(line); suggestions.push({ comp, row, target, label: sg.label });
+      const yes = document.createElement("button"); yes.className = "secondary small"; yes.textContent = "Yes, same"; yes.setAttribute("aria-label", `Yes, same: ${comp} ${row.item} is ${sg.label}`); yes.onclick = () => saveLink(comp, row, target);
+      line.appendChild(yes); cell.appendChild(line); suggestions.push({ comp, row, target, label: sg.label, ref: cmp.ref, size: compSize(comp, row) });
     }
   });
   const allBtn = $("cmpSuggestAll"); allBtn.hidden = !suggestions.length; allBtn.textContent = `Apply the ${suggestions.length} "Maybe" suggestion(s)`;
@@ -1724,55 +1763,75 @@ function renderAI() {   // the suggestions Claude made, each to be checked by yo
   aiSuggestions.forEach((sg) => {
     const line = document.createElement("div"); line.className = "linkRow";
     const text = document.createElement("span"); text.textContent = `${sg.comp} · ${sg.row.size} · ${sg.row.item}  ≈  ${sg.label}`; line.appendChild(text);
-    const ok = document.createElement("button"); ok.className = "secondary small"; ok.textContent = "Apply"; ok.onclick = () => applyAI([sg]); line.appendChild(ok);
-    const no = document.createElement("button"); no.className = "secondary small"; no.textContent = "Not the same"; no.onclick = () => { aiSuggestions = aiSuggestions.filter((x) => x !== sg); renderAI(); }; line.appendChild(no);
+    const ok = document.createElement("button"); ok.className = "secondary small"; ok.textContent = "Apply"; ok.setAttribute("aria-label", `Apply: ${sg.comp} ${sg.row.item} is ${sg.label}`); ok.onclick = () => applyAI([sg]); line.appendChild(ok);
+    const no = document.createElement("button"); no.className = "secondary small"; no.textContent = "Not the same"; no.setAttribute("aria-label", `Not the same: ${sg.comp} ${sg.row.item}`); no.onclick = () => { aiSuggestions = aiSuggestions.filter((x) => x !== sg); renderAI(); }; line.appendChild(no);
     box.appendChild(line);
   });
 }
 async function applyAI(list) {
-  const mySession = session;
+  const mySession = session, applied = [];
   try {
     for (const sg of list) {
-      links = (await api("links", { action: "set", comp: norm(sg.comp), item: norm(sg.row.item) + "|" + compSize(sg.comp, sg.row), ref: norm(cmp.ref), target: sg.target })).links || {};
+      await queueLink(() => putLink(sg.comp, `${norm(sg.row.item)}|${sg.size}|${norm(sg.ref)}`, sg.ref, sg.target));   // the reference, size and target as they were when Claude suggested it
+      if (mySession !== session) return;
+      applied.push(sg);
+    }
+  } catch (e) { alert(e.message); }
+  aiSuggestions = aiSuggestions.filter((x) => !applied.includes(x));   // the ones that failed or were never sent stay for another try
+  renderAI(); renderCompare();
+}
+$("cmpSuggestAll").onclick = async () => {   // the same list the button counted (already without duplicates and without items that are taken)   // every "Maybe" in the list at once (each restaurant's items go to different items of yours)
+  const todo = ((cmpState && cmpState.suggestions) || []).slice();
+  if (!todo.length || !confirm(`Apply ${todo.length} suggested match(es)? You can undo each one under "Linked by hand".`)) return;
+  const mySession = session, snap = cmpState;
+  try {
+    for (const sg of todo) {
+      await queueLink(() => putLink(sg.comp, `${norm(sg.row.item)}|${sg.size}|${norm(sg.ref)}`, sg.ref, sg.target));
       if (mySession !== session) return;
     }
   } catch (e) { alert(e.message); }
-  aiSuggestions = aiSuggestions.filter((x) => !list.includes(x)); renderAI(); renderCompare();
-}
-$("cmpSuggestAll").onclick = async () => {   // every "Maybe" in the list at once (each restaurant's items go to different items of yours)
-  const list = (cmpState && cmpState.suggestions) || [], seen = new Set(), todo = [];
-  list.forEach((sg) => { const k = sg.comp + "|" + sg.target; if (!seen.has(k)) { seen.add(k); todo.push(sg); } });
-  if (!todo.length || !confirm(`Apply ${todo.length} suggested match(es)? You can undo each one under "Linked by hand".`)) return;
-  const mySession = session;
-  try {
-    for (const sg of todo) { links = (await api("links", { action: "set", comp: norm(sg.comp), item: norm(sg.row.item) + "|" + compSize(sg.comp, sg.row), ref: norm(cmp.ref), target: sg.target })).links || {}; if (mySession !== session) return; }
-  } catch (e) { alert(e.message); }
   renderCompare();
 };
+const AI_CHUNK = 40;   // their items per request: a normal function may only run about 10 seconds
 $("cmpAIBtn").onclick = async () => {
   if (aiBusy || !cmpState) return;
-  const labels = [...cmpState.pickList.keys()], byComp = new Map();
-  cmpState.unmatched.forEach(({ comp, row }) => { if (!byComp.has(comp)) byComp.set(comp, []); byComp.get(comp).push(row); });
+  const state = cmpState, labels = [...state.pickList.keys()], byComp = new Map(), view = `${cmp.ref}|${cmp.platform}`;
+  state.unmatched.forEach(({ comp, row }) => { if (!byComp.has(comp)) byComp.set(comp, []); byComp.get(comp).push(row); });
   if (!byComp.size) return aiStatus("Nothing is waiting to be matched.", "muted");
   if (labels.length > 150) return aiStatus(`Your menu has ${labels.length} items here, which is too many for one go. Choose one of your headlines above first (150 items at most).`, "err");
-  const total = [...byComp.values()].reduce((n, r) => n + r.length, 0);
-  if (!confirm(`Send ${labels.length} of your item names and ${total} of theirs to Claude to suggest matches?\n\nIt costs a few cents. Nothing is saved until you check and apply each suggestion.`)) return;
+  const total = [...byComp.values()].reduce((n, r) => n + r.length, 0), calls = [...byComp.values()].reduce((n, r) => n + Math.ceil(r.length / AI_CHUNK), 0);
+  if (!confirm(`Send ${labels.length} of your item names and ${total} of theirs to Claude to suggest matches (${calls} request${calls > 1 ? "s" : ""})?\n\nIt costs a few cents. Nothing is saved until you check and apply each suggestion.`)) return;
   aiBusy = true; $("cmpAIBtn").disabled = true; aiSuggestions = []; renderAI();
-  const mySession = session; const problems = []; let n = 0;
-  for (const [comp, rows] of byComp) {
-    for (let i = 0; i < rows.length; i += 150) {
-      const chunk = rows.slice(i, i + 150);
-      aiStatus(`Asking Claude about ${comp}…`);
-      try {
-        const out = await api("aimatch", { mine: labels, theirs: chunk.map((r) => `${r.size} · ${r.item}`) });
-        if (mySession !== session) return;
-        for (const pr of out.pairs || []) { const label = labels[pr.mine], target = cmpState.pickList.get(label); if (target && chunk[pr.their]) { aiSuggestions.push({ comp, row: chunk[pr.their], label, target }); n++; } }
-      } catch (e) { if (e.message === "Wrong password") return; problems.push(`${comp}: ${e.message}`); }
+  const mySession = session, problems = [], found = []; let timedOut = false;
+  try {
+    outer: for (const [comp, rows] of byComp) {
+      for (let i = 0; i < rows.length; i += AI_CHUNK) {
+        const chunk = rows.slice(i, i + AI_CHUNK);
+        aiStatus(`Asking Claude about ${comp}…`);
+        try {
+          const out = await api("aimatch", { mine: labels, theirs: chunk.map((r) => `${r.size} · ${r.item}`) });
+          if (mySession !== session) return;
+          if (`${cmp.ref}|${cmp.platform}` !== view) { aiStatus("You changed the restaurant or the app while Claude was working. Press the button again.", "err"); return; }
+          for (const pr of out.pairs || []) {
+            const label = labels[pr.mine], target = state.pickList.get(label), row = chunk[pr.their];
+            if (!target || !row) continue;
+            if (state.matchedOf.get(comp)?.has(state.pickKey.get(label))) continue;   // that item of yours already has a match for this restaurant
+            if (found.some((f) => f.comp === comp && (f.row === row || f.target === target))) continue;   // each of their items and each of yours once
+            found.push({ comp, row, label, target, ref: cmp.ref, size: compSize(comp, row) });
+          }
+        } catch (e) {
+          if (e.message === "Wrong password") return;
+          problems.push(`${comp}: ${e.message}`);
+          if (/too long|busy/i.test(e.message)) { timedOut = true; break outer; }   // stop here: more requests would only cost more
+        }
+      }
     }
+    aiSuggestions = found; renderAI();
+    const n = found.length;
+    aiStatus((n ? `Claude found ${n} possible match(es). Check them below.` : "Claude found no confident matches.") + (problems.length ? " ⚠ " + problems.join(" · ") + (timedOut ? " Stopped to save cost." : "") : ""), problems.length ? "err" : "muted");
+  } finally {
+    if (mySession === session) { aiBusy = false; $("cmpAIBtn").disabled = false; }   // never left stuck, whatever happened
   }
-  aiBusy = false; $("cmpAIBtn").disabled = false; renderAI();
-  aiStatus(n ? `Claude found ${n} possible match(es). Check them below.` : "Claude found no confident matches." , problems.length ? "err" : "muted");
-  if (problems.length) aiStatus((n ? `Claude found ${n} possible match(es). ` : "") + "⚠ " + problems.join(" · "), "err");
 };
 function applyUnFilter() {   // the filter box above the "Not matched yet" table
   const q = ($("cmpUnFilter").value || "").trim().toLowerCase();
@@ -1782,21 +1841,37 @@ $("cmpUnFilter").oninput = applyUnFilter;
 const cmpOpen = {};   // which lists under the table you left open
 document.querySelectorAll("details.cmpMore").forEach((d) => d.addEventListener("toggle", () => { cmpOpen[d.id] = d.open; }));
 function restoreOpen() { ["cmpUnmatched", "cmpHeads", "cmpSimilar", "cmpLinked"].forEach((id) => { const want = id in cmpOpen ? cmpOpen[id] : (id === "cmpUnmatched" || id === "cmpHeads"); if ($(id).open !== want) $(id).open = want; }); }
-async function saveHeadLink(comp, headline, target) {   // headline links live in the same saved list, under a "~" key
-  try { links = (await api("links", { action: "set", comp: norm(comp), item: "~" + norm(headline), ref: norm(cmp.ref), target })).links || {}; renderCompare(); }
-  catch (e) { alert(e.message); renderCompare(); }
+// Links are saved one at a time: two quick taps cannot overwrite each other, and the screen always shows the newest answer.
+let linkChain = Promise.resolve();
+const queueLink = (job) => (linkChain = linkChain.then(job, job));
+async function putLink(comp, itemPart, ref, target) {   // item: "<item>|<size>|<ref>" (new) -- the server joins it to the restaurant
+  links = (await api("links", { action: "set", comp: norm(comp), item: itemPart, ref: norm(ref), target })).links || {};
 }
-async function saveLink(comp, row, target) {
-  const sized = norm(row.item) + "|" + compSize(comp, row);
-  const useOld = target === "" && !links[norm(comp) + "|" + sized] && links[norm(comp) + "|" + norm(row.item)];   // removing a link that was saved without a size
-  try { links = (await api("links", { action: "set", comp: norm(comp), item: useOld ? norm(row.item) : sized, ref: norm(cmp.ref), target })).links || {}; renderCompare(); }
-  catch (e) { alert(e.message); renderCompare(); }
+function saveHeadLink(comp, headline, target) {   // headline links live in the same saved list, under a "~" key
+  const mySession = session, keys = headLinkKeys(comp, headline), c = norm(comp);
+  return queueLink(async () => {
+    try {
+      if (target === "") { for (const k of foundLinks(keys)) { await putLink(comp, k.slice(c.length + 1), cmp.ref, ""); } }
+      else await putLink(comp, "~" + norm(headline) + "|" + norm(cmp.ref), cmp.ref, target);
+    } catch (e) { if (mySession === session) alert(e.message); }
+    if (mySession === session) renderCompare();
+  });
+}
+function saveLink(comp, row, target) {
+  const mySession = session, keys = itemLinkKeys(comp, row), c = norm(comp), size = compSize(comp, row), ref = cmp.ref;
+  return queueLink(async () => {
+    try {
+      if (target === "") { for (const k of foundLinks(keys)) { await putLink(comp, k.slice(c.length + 1), ref, ""); } }   // takes away every form of it, so an older copy cannot come back
+      else await putLink(comp, `${norm(row.item)}|${size}|${norm(ref)}`, ref, target);
+    } catch (e) { if (mySession === session) alert(e.message); }
+    if (mySession === session) renderCompare();
+  });
 }
 ["cmpRef", "cmpPlat", "cmpHead", "cmpBasis", "cmpDen"].forEach((id) => {
   $(id).onchange = () => {
     const v = $(id).value;
-    if (id === "cmpRef") { cmp.ref = v; cmp.platform = ""; cmp.headline = ""; }
-    else if (id === "cmpPlat") { cmp.platform = v; cmp.headline = ""; }
+    if (id === "cmpRef") { cmp.ref = v; cmp.platform = ""; cmp.headline = ""; aiSuggestions = []; renderAI(); }
+    else if (id === "cmpPlat") { cmp.platform = v; cmp.headline = ""; aiSuggestions = []; renderAI(); }
     else if (id === "cmpHead") cmp.headline = v;
     else if (id === "cmpBasis") cmp.basis = v;
     else cmp.den = v;

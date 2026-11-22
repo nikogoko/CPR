@@ -25,7 +25,16 @@ export default async (req) => {
 
     const records = await readAllHistory(store);
     const rows = records.flatMap((rec) => rec.rows.map((r) => ({ ...r, platform: r.platform || "", restaurant: rec.name })));
-    return json(200, { rows });
+    // A reply may not be bigger than about 6 MB. If it would be, the oldest automatic rows are left out of this view (nothing is deleted).
+    const LIMIT = 4_800_000;
+    let size = JSON.stringify(rows).length, hidden = 0, out = rows;
+    if (size > LIMIT) {
+      const order = rows.map((r, i) => i).filter((i) => rows[i].auto === true).sort((a, b) => String(rows[a].date).localeCompare(String(rows[b].date)));
+      const drop = new Set();
+      for (const i of order) { if (size <= LIMIT) break; size -= JSON.stringify(rows[i]).length + 1; drop.add(i); }
+      out = rows.filter((_, i) => !drop.has(i)); hidden = drop.size;
+    }
+    return json(200, { rows: out, ...(hidden ? { hidden } : {}) });
   } catch (e) {
     return json(500, { error: e.message });
   }
