@@ -320,6 +320,7 @@
           <span class="muted" id="cmpAIStatus">Asks Claude which of their items are the same dish as yours (translations, different spelling). Costs a few cents. You check every suggestion before it is saved.</span>
         </div>
         <div id="cmpAI"></div>
+        <p><button class="secondary small" id="cmpSuggestAll" hidden>Apply all suggestions</button></p>
         <input id="cmpUnFilter" type="search" placeholder="Filter by restaurant, headline or item…" autocomplete="off" style="max-width:340px;margin-bottom:8px">
         <datalist id="cmpAllMine"></datalist>
         <div class="scroll"><table class="grid" id="cmpUnTable"></table></div>
@@ -560,6 +561,7 @@ const csv = (t) => String(t || "").split(/[,\n]+/).map((x) => x.trim()).filter(B
 const groupsToText = (g) => (g || []).map((x) => x.join(", ")).join("\n");
 const textToGroups = (t) => String(t || "").split("\n").map((line) => csv(line)).filter((x) => x.length);
 function applySettings(st) {
+  clearKeyCaches();
   NORMAL_SIZE = st.normalSize; SMALL_SIZE = st.smallSize;
   SAME_SIZE = Object.fromEntries(st.sameSizes.filter((n) => n !== st.normalSize).map((n) => [n, st.normalSize]));
   SMALL_WORDS = st.smallWords; NORMAL_WORDS = st.normalWords;
@@ -1191,7 +1193,7 @@ function applyWordGroups(groups) {
       for (const k of [w, geoStem(w)]) if (!m.has(k)) m.set(k, canon);
     }
   }
-  WORD_MAP = m;
+  WORD_MAP = m; clearKeyCaches();
 }
 // A word in its group form. Falls back to the Georgian stem, so plural and singular still match without any group; English plurals (-s, -es) too.
 const canonWord = (w) => WORD_MAP.get(w) || WORD_MAP.get(geoStem(w)) || WORD_MAP.get(w.replace(/es$/, "")) || WORD_MAP.get(w.replace(/s$/, "")) || geoStem(w);
@@ -1239,7 +1241,7 @@ function uniqueByCode(words) {
 }
 const rawTextKey = (text) => "t" + phraseKey(uniqueByCode(wordsOf(text).map(canonWord)).sort());   // headline words: any order, any form, any language group
 function rebuildLearned() {
-  LEARNED = new Map();
+  LEARNED = new Map(); clearKeyCaches();
   if (!LEARN_BILINGUAL) return;
   const seenH = new Set(), seenN = new Set();
   for (const r of history) {
@@ -1254,9 +1256,15 @@ function rebuildLearned() {
       if (parts) { const ks = parts.map(rawNameKey).filter(Boolean); for (let i = 1; i < ks.length; i++) unionKeys(ks[0], ks[i]); }
     }
   }
+  clearKeyCaches();   // what was analysed while learning used a half-built picture
 }
+// Analysing a name or headline is the slow part of Compare, and the same texts come up hundreds of times in one draw.
+// Results are kept until something that changes them does (settings, word groups, what was learned, a history reload).
+const KEYCACHE = { size: new Map(), name: new Map(), words: new Map(), sim: new Map() };
+const clearKeyCaches = () => Object.values(KEYCACHE).forEach((m) => m.clear());
+const cached = (store, key, make) => { let v = store.get(key); if (v === undefined) { v = make(); store.set(key, v); } return v; };
 let headAlias = new Map();   // set on every Compare draw: their headline key -> your headline key, when only a few letters differ
-function sizeInfo(h) {
+function sizeInfoRaw(h) {
   const m = String(h ?? "").match(/\d+(?:[.,]\d+)?/);
   if (m) { const n = m[0].replace(",", "."); return SAME_SIZE[n] ? { key: SAME_SIZE[n], how: "number", aliased: true } : { key: n, how: "number" }; }
   const words = wordsOf(h);
@@ -1268,14 +1276,27 @@ function sizeInfo(h) {
   if (has(NORMAL_WORDS)) return { key: NORMAL_SIZE, how: "word" };
   return { key: textKey, how: "text" };                                              // anything else is compared by its words
 }
+const sizeInfo = (h) => cached(KEYCACHE.size, String(h ?? ""), () => sizeInfoRaw(h));
 const sizeKey = (h) => sizeInfo(h).key;
 
 // Dish names. Words that say nothing about WHICH dish are left out: "pizza", the style word "Neapolitan", words you listed in
 // Settings ("special", "classic" ...), and sizes ("33სმ", "33 cm"): "Pizza", "პიცა" and "ნეაპოლიტანური პიცა 33სმ" are all just "a pizza".
 const NAME_FILLER = new Set(["pizza", "pizzas", "piza", "pitsa", "პიცა", "პიც", "neapolitan", "napoletana", "napoletano", "ნეაპოლიტანური", "ნეაპოლიტანულ"]);
 const SIZE_UNITS = new Set(["cm", "სმ", "см", "sm"]);
+// "330 მლ", "330ml", "0.33 L", "0,5l", "200 გრ", "1 kg" become one token ("vol330ml", "vol500ml", "wt200g"): the same amount matches however it is written, a different amount does not.
+const MEASURE_RE = /(\d+(?:[.,]\d+)?)\s*(ml|მლ|мл|cl|ლიტრი|ლიტრ|ლტ|l|ლ|kg|კგ|კილო|gr|გრამი|გრ|g|გ)(?![\p{L}\p{N}])/giu;
+function normMeasures(text) {
+  return text.replace(MEASURE_RE, (m, num, unit) => {
+    const n = parseFloat(num.replace(",", ".")), u = unit.toLowerCase();
+    if (/^(ml|მლ|мл)$/.test(u)) return ` vol${Math.round(n)}ml `;
+    if (/^cl$/.test(u)) return ` vol${Math.round(n * 10)}ml `;
+    if (/^(l|ლ|ლიტრი|ლიტრ|ლტ)$/.test(u)) return ` vol${Math.round(n * 1000)}ml `;
+    if (/^(g|gr|გრ|გრამი|გ)$/.test(u)) return ` wt${Math.round(n)}g `;
+    return ` wt${Math.round(n * 1000)}g `;
+  });
+}
 function nameTokens(name) {   // each word as written (w) and in its word-group form (c)
-  const raw = String(name ?? "").normalize("NFKD").replace(/[\u0300-\u036f]/g, "").toLowerCase().split(/[^\p{L}\p{N}]+/u).filter(Boolean), out = [];
+  const raw = normMeasures(String(name ?? "").normalize("NFKD").replace(/[\u0300-\u036f]/g, "").toLowerCase()).split(/[^\p{L}\p{N}]+/u).filter(Boolean), out = [];
   for (let i = 0; i < raw.length; i++) {
     const w = raw[i];
     if (/^\d+(cm|სმ|см|sm)$/.test(w)) continue;                                       // "33სმ"
@@ -1287,7 +1308,8 @@ function nameTokens(name) {   // each word as written (w) and in its word-group 
 }
 const nameWords = (name) => uniqueByCode(nameTokens(name).map((t) => t.c));
 const rawNameKey = (name) => phraseKey(nameWords(name));
-const nameKey = (name) => { const parts = labelParts(name); return canonKey(rawNameKey(parts ? parts[0] : name)); };
+const nameKeyRaw = (name) => { const parts = labelParts(name); return canonKey(rawNameKey(parts ? parts[0] : name)); };
+const nameKey = (name) => cached(KEYCACHE.name, String(name ?? ""), () => nameKeyRaw(name));
 
 // A few letters off. Compared on the short codes, so vowel differences never count; a different consonant or a typo costs one edit.
 function levenshtein(a, b) {
@@ -1308,7 +1330,7 @@ function nearCode(a, b, level = MATCH_LEVEL) {
   return levenshtein(a, b) <= editLimit(Math.max(a.length, b.length), level);
 }
 // Per word, its short codes: from the word-group form AND as written, so a word that is in a group still matches a misspelling that is not.
-function wordCodes(name) {
+function wordCodesRaw(name) {
   const parts = labelParts(name), seen = new Set(), sets = [];
   nameTokens(parts ? parts[0] : name).forEach(({ w, c }) => {
     const codes = [...new Set([canonKey(phraseKey([c])), phraseKey([w])].filter(Boolean))], id = codes.join("|");
@@ -1317,7 +1339,7 @@ function wordCodes(name) {
   return sets;
 }
 // 0 = not alike. Otherwise higher is more alike: the whole name a few letters off, or most words alike (one name's words inside the other's).
-function nameSimilarity(a, b) {
+function nameSimilarityRaw(a, b) {
   if (MATCH_LEVEL === "off") return 0;
   const ka = nameKey(a), kb = nameKey(b);
   if (ka && kb && ka !== kb && nearCode(ka, kb)) return 0.9 - levenshtein(ka, kb) / (Math.max(ka.length, kb.length) * 10);
@@ -1330,6 +1352,18 @@ function nameSimilarity(a, b) {
   if (MATCH_LEVEL === "careful") return inside && share >= 0.5 ? 0.5 + 0.3 * share : 0;
   return inside || jac >= 0.5 ? 0.4 + 0.3 * jac : 0;
 }
+
+// Two headlines may hold the same dish when they are the same size, or when neither has a size and they share a word ("drinks" / "soft drinks").
+function headlinesCompatible(a, b) {
+  const ka = sizeKey(a), kb = sizeKey(b);
+  if (ka === kb) return true;
+  if (ka[0] !== "t" || kb[0] !== "t") return false;   // a size (33) never goes with a different size or with a category
+  const codes = (h) => { const parts = labelParts(h); return wordsOf(parts ? parts[0] : h).map((w) => canonKey(phraseKey([canonWord(w)]))).filter(Boolean); };
+  const A = codes(a), B = codes(b);
+  return A.some((x) => B.some((y) => nearCode(x, y)));
+}
+const wordCodes = (name) => cached(KEYCACHE.words, String(name ?? ""), () => wordCodesRaw(name));
+const nameSimilarity = (a, b) => cached(KEYCACHE.sim, a + "\u0001" + b, () => nameSimilarityRaw(a, b));
 
 // The way names and headlines were compared before the word groups. Hand links saved earlier hold keys made this way, so they still work.
 const legacyNameKey = (name) => phraseKey(String(name ?? "").normalize("NFKD").replace(/[\u0300-\u036f]/g, "").toLowerCase().split(/[^\p{L}\p{N}]+/u).filter((w) => w && !["pizza", "piza", "pitsa", "პიცა"].includes(w)).map(geoStem));
@@ -1438,6 +1472,7 @@ function renderCompare() {
   const groupSizes = new Set(group.map((r) => sizeKey(r.size)));
   const refKey = (r) => sizeKey(r.size) + "|" + nameKey(r.item);
   const refByKey = new Map(); group.forEach((r) => refByKey.set(refKey(r), r));
+  const keyList = group.map(refKey), firstOfKey = new Map(); keyList.forEach((k, i) => { if (!firstOfKey.has(k)) firstOfKey.set(k, i); });   // each of your items once, in order
   const legacyRef = new Map(); group.forEach((r) => legacyRef.set(sizeKey(r.size) + "|" + legacyNameKey(r.item), refKey(r)));   // links saved before the word groups point at these
 
   // Every other restaurant's current prices, matched to yours by name + size (or by a link you saved).
@@ -1477,7 +1512,7 @@ function renderCompare() {
       }
     });
     if (MATCH_LEVEL !== "off") {   // names a few letters off, or sharing most of their words, are matched as a guess: shown with ≈ and a "Not the same" button
-      const taken = new Set(best.keys()), free = group.filter((r, i) => !taken.has(refKey(r)) && group.findIndex((x) => refKey(x) === refKey(r)) === i), pairs = [];
+      const taken = new Set(best.keys()), free = group.filter((r, i) => !taken.has(keyList[i]) && firstOfKey.get(keyList[i]) === i), pairs = [];
       unmatched.forEach((row, ui) => {
         if (linkOf(name, row)) return;   // linked or marked "not the same" by you: left alone
         const sz = compSize(name, row);
@@ -1525,7 +1560,7 @@ function renderCompare() {
     });
   });
   const cols = comps.filter((c) => c.matches.size);
-  const rows = group.filter((r, i) => group.findIndex((x) => refKey(x) === refKey(r)) === i && cols.some((c) => c.matches.has(refKey(r))));
+  const rows = group.filter((r, i) => firstOfKey.get(keyList[i]) === i && cols.some((c) => c.matches.has(keyList[i])));
   $("cmpEmpty").hidden = !!rows.length;
   if (!rows.length) $("cmpEmpty").textContent = "No items match yet. Items match when the name and size are the same in both restaurants; use the list below to link the ones named differently.";
   $("cmpWrap").hidden = $("cmpLegend").hidden = !rows.length;
@@ -1572,10 +1607,23 @@ function renderCompare() {
 
   // Items with no match: pick the same dish of yours (any headline) once, and it is remembered.
   const multiHead = new Set(group.map((r) => r.size)).size > 1;
-  const pickList = new Map();   // what you see in the list -> the link it makes
-  [...group].sort((x, y) => naturalSort(x.size, y.size) || naturalSort(x.item, y.item)).forEach((r) => { const label = multiHead ? `${r.size} · ${r.item}` : r.item; if (!pickList.has(label)) pickList.set(label, "@" + norm(r.size) + "|" + norm(r.item)); });
+  const pickList = new Map(), pickRows = new Map();   // what you see in the list -> the link it makes, and the item of yours behind it
+  [...group].sort((x, y) => naturalSort(x.size, y.size) || naturalSort(x.item, y.item)).forEach((r) => { const label = multiHead ? `${r.size} · ${r.item}` : r.item; if (!pickList.has(label)) { pickList.set(label, "@" + norm(r.size) + "|" + norm(r.item)); pickRows.set(label, r); } });
   const dl = $("cmpAllMine"); dl.innerHTML = ""; pickList.forEach((_, label) => { const o = document.createElement("option"); o.value = label; dl.appendChild(o); });
   const unmatched = comps.flatMap((c) => [...c.unmatched, ...c.other].map((row) => ({ comp: c.name, row })));
+  // A suggestion for an item with no match: the one of yours whose name is most alike, in a headline that could hold it. Only a suggestion.
+  const suggestFor = (row) => {
+    if (MATCH_LEVEL === "off") return null;
+    let best = null, tie = false;
+    pickRows.forEach((r, label) => {
+      if (!headlinesCompatible(row.size, r.size)) return;
+      const sc = nameSimilarity(row.item, r.item);
+      if (sc <= 0) return;
+      if (!best || sc > best.sc + 0.001) { best = { sc, label, r }; tie = false; } else if (Math.abs(sc - best.sc) <= 0.001) tie = true;
+    });
+    return best && !tie ? best : null;
+  };
+  const suggestions = [];
   cmpState = { unmatched: unmatched.filter(({ comp, row }) => linkOf(comp, row) !== "!"), pickList };   // for the "Match the rest with Claude" button
   $("cmpUnmatched").hidden = !unmatched.length;
   $("cmpUnmatchedSum").textContent = `Not matched yet (${unmatched.length}): match them by hand`;
@@ -1599,7 +1647,16 @@ function renderCompare() {
     };
     const no = document.createElement("button"); no.className = "secondary small"; no.textContent = "Not the same"; no.onclick = () => saveLink(comp, row, "!");
     cell.append(input, no);
+    const sg = suggestFor(row);
+    if (sg) {
+      const target = pickList.get(sg.label), line = document.createElement("div"); line.className = "muted";
+      line.textContent = `Maybe: ${sg.label} `;
+      const yes = document.createElement("button"); yes.className = "secondary small"; yes.textContent = "Yes, same"; yes.onclick = () => saveLink(comp, row, target);
+      line.appendChild(yes); cell.appendChild(line); suggestions.push({ comp, row, target, label: sg.label });
+    }
   });
+  const allBtn = $("cmpSuggestAll"); allBtn.hidden = !suggestions.length; allBtn.textContent = `Apply the ${suggestions.length} "Maybe" suggestion(s)`;
+  cmpState.suggestions = suggestions;
   applyUnFilter();
   $("cmpHeads").hidden = !loose.length && !setByHand.length;
   $("cmpHeadsSum").textContent = `Headlines that do not match yours (${loose.length})` + (setByHand.length ? ` · set by hand (${setByHand.length})` : "");
@@ -1682,6 +1739,16 @@ async function applyAI(list) {
   } catch (e) { alert(e.message); }
   aiSuggestions = aiSuggestions.filter((x) => !list.includes(x)); renderAI(); renderCompare();
 }
+$("cmpSuggestAll").onclick = async () => {   // every "Maybe" in the list at once (each restaurant's items go to different items of yours)
+  const list = (cmpState && cmpState.suggestions) || [], seen = new Set(), todo = [];
+  list.forEach((sg) => { const k = sg.comp + "|" + sg.target; if (!seen.has(k)) { seen.add(k); todo.push(sg); } });
+  if (!todo.length || !confirm(`Apply ${todo.length} suggested match(es)? You can undo each one under "Linked by hand".`)) return;
+  const mySession = session;
+  try {
+    for (const sg of todo) { links = (await api("links", { action: "set", comp: norm(sg.comp), item: norm(sg.row.item) + "|" + compSize(sg.comp, sg.row), ref: norm(cmp.ref), target: sg.target })).links || {}; if (mySession !== session) return; }
+  } catch (e) { alert(e.message); }
+  renderCompare();
+};
 $("cmpAIBtn").onclick = async () => {
   if (aiBusy || !cmpState) return;
   const labels = [...cmpState.pickList.keys()], byComp = new Map();
