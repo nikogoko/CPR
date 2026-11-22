@@ -118,7 +118,7 @@ index line chart, and yellow cells meaning "price changed since yesterday").
 - Matching core: digits are never collapsed (330 ml is not 300 ml), volumes/weights are normalised (0.33 L = 330 ml, Russian units too), learned equivalences keep one word per language per group, headline sizes need cm/სმ or a plausible 10-100 pizza number.
 - Excel: sheet names are always legal and unique ("History" and "All data" are reserved); an invalid saved date becomes text instead of corrupting the file; date column is wide and left-aligned.
 - Server: the automatic fetch never overwrites a price saved by hand; prices like "1e5", "28-30", 100000+ are refused; the history reply is cut below 4.8 MB (oldest automatic rows hidden, page tells you, nothing deleted); `aimatch` takes at most 60 of their items, 1500 output tokens, and ignores instructions inside the lists.
-- Not done (low value, decide later): a "keep automatic days" setting (fixed 30), merging new built-in word groups when a stale page saves settings, passkey challenge flood limit.
+- Also: "Keep automatic prices for N days" setting (7-365, default 30); a stale page saving old word groups gets the new built-in groups merged in; two fetch hours must be 3 apart across midnight too. Still not done: passkey challenge flood limit.
 
 ## 8. Known risks (never verified live)
 - Nothing was ever run against the real Claude API, real Netlify Blobs, a real Glovo/Wolt screenshot, or a real phone with Face ID. The owner's first real use is the real test.

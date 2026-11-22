@@ -392,6 +392,7 @@
     </div>
     <h3>Compare</h3>
     <div class="row">
+      <label>Keep automatic prices for <input type="number" id="setKeep" min="7" max="365" style="width:5em"> days (prices you save by hand are never removed)</label>
       <label class="tick"><input type="checkbox" id="setLearn"> Learn from labels written in two languages, like "სასმელები / drinks"</label>
     </div>
     <div class="row">
@@ -567,7 +568,7 @@ function applySettings(st) {
   SAME_SIZE = Object.fromEntries(st.sameSizes.filter((n) => n !== st.normalSize).map((n) => [n, st.normalSize]));
   SMALL_WORDS = st.smallWords; NORMAL_WORDS = st.normalWords;
   applyWordGroups(st.wordGroups);
-  IGNORE_WORDS = new Set((st.ignoreWords || []).map((w) => String(w).toLowerCase())); LEARN_BILINGUAL = st.learnBilingual !== false; MATCH_LEVEL = st.matchLevel || "careful";
+  IGNORE_WORDS = new Set((st.ignoreWords || []).map((w) => String(w).toLowerCase())); LEARN_BILINGUAL = st.learnBilingual !== false; SET_GV = st.wordGroupsVersion || 0; MATCH_LEVEL = st.matchLevel || "careful";
   rebuildLearned();
   defaultApp = st.defaultApp || "auto"; chosenPlatform = {};
   if (isRestaurantView() && !$("app").hidden) renderRestaurant();
@@ -579,7 +580,7 @@ function fillSettings(st) {
   $("setNormalWords").value = st.normalWords.join(", "); $("setSmallSize").value = st.smallSize;
   $("setSmallWords").value = st.smallWords.join(", "); $("setPercent").value = st.percentBase; $("setApp").value = st.defaultApp || "auto";
   $("setGroups").value = groupsToText(st.wordGroups);
-  $("setLearn").checked = st.learnBilingual !== false; $("setMatch").value = st.matchLevel || "careful"; $("setIgnore").value = (st.ignoreWords || []).join(", ");
+  $("setKeep").value = st.keepAutomaticDays || 30; $("setLearn").checked = st.learnBilingual !== false; $("setMatch").value = st.matchLevel || "careful"; $("setIgnore").value = (st.ignoreWords || []).join(", ");
   fillSchedule(st.schedule || { enabled: false, hours: [6], days: [1, 2, 3, 4, 5, 6, 7] });
 }
 async function loadSettings() { try { const { settings } = await api("settings", { action: "load" }); applySettings(settings); fillSettings(settings); } catch {} }
@@ -607,7 +608,7 @@ async function sendSettings(body, okText) {
 }
 $("setSave").onclick = () => sendSettings({ action: "save", settings: {
   limit: $("setLimit").value, normalSize: $("setNormalSize").value.trim(), sameSizes: csv($("setSame").value),
-  normalWords: csv($("setNormalWords").value), smallSize: $("setSmallSize").value.trim(), smallWords: csv($("setSmallWords").value), percentBase: $("setPercent").value, defaultApp: $("setApp").value, schedule: readSchedule(), wordGroups: textToGroups($("setGroups").value), learnBilingual: $("setLearn").checked, matchLevel: $("setMatch").value, ignoreWords: csv($("setIgnore").value)
+  normalWords: csv($("setNormalWords").value), smallSize: $("setSmallSize").value.trim(), smallWords: csv($("setSmallWords").value), percentBase: $("setPercent").value, defaultApp: $("setApp").value, schedule: readSchedule(), wordGroups: textToGroups($("setGroups").value), keepAutomaticDays: Number($("setKeep").value), wordGroupsVersion: SET_GV, learnBilingual: $("setLearn").checked, matchLevel: $("setMatch").value, ignoreWords: csv($("setIgnore").value)
 } }, "Saved.");
 $("setReset").onclick = () => { if (confirm("Put every setting back to its default?")) sendSettings({ action: "reset" }, "Back to the defaults."); };
 
@@ -1227,6 +1228,7 @@ function labelParts(label) {   // the parts of a label that says one thing in se
 }
 // What the page has learned from your own data: every bilingual label tells that its parts mean the same, so
 // "სასმელები / drinks" teaches that "drinks" and სასმელები are one thing (a union-find over the keys). Switched on or off in Settings.
+let SET_GV = 0;
 let LEARNED = new Map(), LEARNED_SCRIPTS = new Map(), LEARN_BILINGUAL = true, IGNORE_WORDS = new Set(), MATCH_LEVEL = "careful";   // MATCH_LEVEL: off | careful | generous
 function rootOf(k) {
   let r = k; while (LEARNED.has(r)) r = LEARNED.get(r);

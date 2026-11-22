@@ -32,7 +32,7 @@ export default async () => {
     return new Response(JSON.stringify(body), { status: 200, headers: { "content-type": "application/json" } });
   };
   const now = tbilisiNow();
-  const { schedule } = await loadSettings(store);
+  const { schedule, keepAutomaticDays } = await loadSettings(store);
   const sources = (await store.get("sources", { type: "json" })) || {};
   let st = await store.get("autofetch", { type: "json" });
   const recent = (st?.recentSlots || []).slice(-6);
@@ -78,7 +78,7 @@ export default async () => {
   if (!st.queue.length) st.finishedAt = new Date().toISOString();
   await store.setJSON("autofetch", st);                                        // the finished state is saved BEFORE any clean-up, so being cut off later cannot undo it
   if (!st.queue.length && clock() - began < START_BUDGET_MS) {                  // clean-up only on a wake-up that still has time to spare; otherwise after the next run
-    try { st.pruned = await pruneAutomatic(store, now.date); await store.setJSON("autofetch", st); } catch { /* cleaning up is optional */ }   // automatic rows older than 30 days
+    try { st.pruned = await pruneAutomatic(store, now.date, keepAutomaticDays); await store.setJSON("autofetch", st); } catch { /* cleaning up is optional */ }   // automatic rows older than 30 days
   }
   return out({ status: st.queue.length ? "more to do" : "finished", ...summarise(st) });
 };
