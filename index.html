@@ -122,6 +122,11 @@
   .legend { font-size: .85rem; color: var(--muted); margin: 12px 0 0; }
 
   /* Glovo / Wolt switch inside a restaurant */
+  .lineChart svg { width: 100%; height: auto; display: block; background: var(--paper); border: 1px solid var(--line); border-radius: 12px; }
+  .lineLegend { display: flex; flex-wrap: wrap; gap: 6px 16px; margin-top: 8px; font-size: .9rem; }
+  .lineLegend i { display: inline-block; width: 18px; height: 4px; border-radius: 2px; margin-right: 6px; vertical-align: middle; }
+  .pricesBox { display: flex; flex-direction: column; gap: 4px; }
+  .pricesBox .lbl { font-size: .75rem; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); font-weight: 600; }
   .seg { display: inline-flex; gap: 4px; padding: 4px; background: #f1e4c8; border-radius: 999px; }
   .seg button { background: transparent; color: var(--ink); padding: 7px 20px; }
   .seg button:not(.active):hover:not(:disabled) { background: #f6e6c4; }
@@ -252,7 +257,7 @@
       </p>
       <div class="scroll">
         <table>
-          <thead><tr><th>Restaurant</th><th>Platform</th><th>Item</th><th>Headline</th><th>Sale price</th><th>Regular price</th><th>Offer</th><th>Popular</th><th>New</th><th>18+</th><th></th></tr></thead>
+          <thead><tr><th>Restaurant</th><th>Platform</th><th>Item</th><th>Category</th><th>Sale price</th><th>Regular price</th><th>Offer</th><th>Popular</th><th>New</th><th>18+</th><th></th></tr></thead>
           <tbody id="rows"></tbody>
         </table>
       </div>
@@ -270,14 +275,14 @@
         <label>Date
           <select id="dateSel"></select>
         </label>
-        <label>Headline
+        <label>Category
           <select id="headSel"></select>
         </label>
         <button class="danger" id="delDateBtn">Delete this date</button>
       </div>
       <p id="platEmpty" class="muted" hidden></p>
       <div class="scroll" id="gridWrap"><table class="grid" id="grid"></table></div>
-      <p class="legend" id="legend"><span class="chg up">▲</span> price went up, <span class="chg down">▼</span> price went down, compared with the last earlier date this pizza was recorded under the same headline.</p>
+      <p class="legend" id="legend"><span class="chg up">▲</span> price went up, <span class="chg down">▼</span> price went down, compared with the last earlier date this pizza was recorded under the same category.</p>
     </div>
   </section>
 
@@ -292,15 +297,12 @@
         <label>App
           <select id="cmpPlat"></select>
         </label>
-        <label>Headline
+        <label>Category
           <select id="cmpHead"></select>
         </label>
-        <label>Prices
-          <select id="cmpBasis">
-            <option value="original">Original (before discounts)</option>
-            <option value="sale">Sale prices (after discounts)</option>
-          </select>
-        </label>
+        <div class="pricesBox"><span class="lbl">Prices</span>
+          <div class="seg" id="cmpBasis"></div>
+        </div>
         <label>Percent of
           <select id="cmpDen">
             <option value="theirs">their price</option>
@@ -315,19 +317,19 @@
       <div class="scroll" id="cmpWrap"><table class="grid cmp" id="cmpGrid"></table></div>
       <p class="legend" id="cmpLegend"></p>
       <details class="cmpMore" id="cmpUnmatched"><summary id="cmpUnmatchedSum"></summary>
-        <p class="muted">These items of theirs have no match in your restaurant yet, including items under headlines that do not match yours. Type or pick the same dish of yours (any headline): the link is saved and used every time. If it is not the same dish, press "Not the same".</p>
+        <p class="muted">These items of theirs have no match in your restaurant yet, including items under categories that do not match yours. Type or pick the same dish of yours (any category): the link is saved and used every time. If it is not the same dish, press "Not the same".</p>
         <div class="row" style="margin-bottom:8px">
           <button class="secondary small" id="cmpAIBtn">✨ Match the rest with Claude</button>
           <span class="muted" id="cmpAIStatus">Asks Claude which of their items are the same dish as yours (translations, different spelling). Costs a few cents. You check every suggestion before it is saved.</span>
         </div>
         <div id="cmpAI"></div>
         <p><button class="secondary small" id="cmpSuggestAll" hidden>Apply all suggestions</button></p>
-        <input id="cmpUnFilter" type="search" placeholder="Filter by restaurant, headline or item…" autocomplete="off" style="max-width:340px;margin-bottom:8px">
+        <input id="cmpUnFilter" type="search" placeholder="Filter by restaurant, category or item…" autocomplete="off" style="max-width:340px;margin-bottom:8px">
         <datalist id="cmpAllMine"></datalist>
         <div class="scroll"><table class="grid" id="cmpUnTable"></table></div>
       </details>
       <details class="cmpMore" id="cmpHeads"><summary id="cmpHeadsSum"></summary>
-        <p class="muted">These headlines have no size in common with yours (for example just "Pizza"), so their items are left out of the table. Pick the headline of yours each one should be compared with. You only do this once. Or mark it "not comparable" to leave it out on purpose.</p>
+        <p class="muted">These categories have no size in common with yours (for example just "Pizza"), so their items are left out of the table. Pick the category of yours each one should be compared with. You only do this once. Or mark it "not comparable" to leave it out on purpose.</p>
         <div class="scroll"><table class="grid" id="cmpHeadTable"></table></div>
         <div id="cmpHeadSetList"></div>
       </details>
@@ -341,6 +343,25 @@
     </div>
   </section>
 
+  <!-- COMPARE LINE TAB -->
+  <section id="lineView" hidden>
+    <div class="card">
+      <h2 class="cmpTitle">Price line</h2>
+      <p class="muted">Pick one dish and see how its price changed over time. Other restaurants that sell the same dish are drawn as extra lines.</p>
+      <div class="row">
+        <label>Your restaurant <select id="lnRef"></select></label>
+        <label>App <select id="lnPlat"></select></label>
+        <label>Category <select id="lnCat"></select></label>
+        <label>Item <select id="lnItem"></select></label>
+        <div class="pricesBox"><span class="lbl">Prices</span><div class="seg" id="lnBasis"></div></div>
+      </div>
+      <div class="pick" id="lnOthers"></div>
+      <p id="lnEmpty" class="muted" hidden></p>
+      <div id="lnChart" class="lineChart"></div>
+      <div id="lnLegend" class="lineLegend"></div>
+    </div>
+  </section>
+
   <section class="card" id="settingsCard" hidden>
     <div class="row" style="justify-content:space-between;align-items:center"><h2 style="margin:0">Settings</h2><button class="secondary small" id="setCloseTop">✕ Close</button></div>
     <p class="muted">Saved on the server, so every device uses the same rules.</p>
@@ -350,7 +371,7 @@
     <h3>What counts as a 33</h3>
     <div class="row">
       <label>Normal size <input id="setNormalSize" size="4"></label>
-      <label>Sizes written in a headline that count as it (commas) <input id="setSame" size="22"></label>
+      <label>Sizes written in a category that count as it (commas) <input id="setSame" size="22"></label>
     </div>
     <div class="row">
       <label>Words that mean a normal pizza when there is no number (commas) <input id="setNormalWords" size="44"></label>
@@ -758,6 +779,7 @@ function renderTabs() {
   add("➕ Add", "add");
   restaurantsSaved().forEach((r) => add(r, r));
   add("⚖ Compare", COMPARE);
+  add("📈 Compare line", LINE);
 }
 let inSettings = false;   // the Settings screen shows on its own, with nothing else
 function showView() {
@@ -765,7 +787,8 @@ function showView() {
   $("addView").hidden = view !== "add";
   $("restView").hidden = !isRestaurantView();
   $("compareView").hidden = view !== COMPARE;
-  if (isRestaurantView()) renderRestaurant(); else if (view === COMPARE) openCompare(); else refreshDownloadScopes();
+  $("lineView").hidden = view !== LINE;
+  if (isRestaurantView()) renderRestaurant(); else if (view === COMPARE) openCompare(); else if (view === LINE) renderLine(); else refreshDownloadScopes();
 }
 
 // What the Download button includes: everything, or (on a restaurant tab) just that restaurant, or just the day shown.
@@ -910,7 +933,7 @@ function renderRestaurant() {
   const hv = chosenHeadline[hKey];
   const hs = $("headSel"); hs.innerHTML = "";
   sizes.forEach((h) => { const o = document.createElement("option"); o.value = h; o.textContent = h; hs.appendChild(o); });
-  const all = document.createElement("option"); all.value = ALL; all.textContent = "All headlines (side by side)"; hs.appendChild(all);
+  const all = document.createElement("option"); all.value = ALL; all.textContent = "All categories (side by side)"; hs.appendChild(all);
   hs.value = hv;
 
   const grid = $("grid"); grid.innerHTML = "";
@@ -1118,7 +1141,7 @@ $("saveBtn").onclick = async () => {
   if (!data.length) return setStatus("Nothing to send.", "err");
   showBad = true; render();
   if (data.some((r) => FIELDS.some((f) => invalid(f, r))))
-    return setStatus("Fix the red cells (restaurant, platform, item, headline and sale price are required).", "err");
+    return setStatus("Fix the red cells (restaurant, platform, item, category and sale price are required).", "err");
   setBusy("save");
   const mySession = session; let justSaved = null, saveOk = false;
   try {
@@ -1137,7 +1160,7 @@ $("saveBtn").onclick = async () => {
     const sent = new Set(sending); data = data.filter((r) => !sent.has(r));   // only the rows that were saved leave the table
     showBad = false; render(); if (data.length) persist();
     $("date").value = ""; updateSaveDate();   // the date box is for one batch only: the next one is saved as today unless you pick a date again
-    setStatus(`Saved ${saved} price(s) for ${niceDate(day)}.` + (replaced ? ` ${replaced} replaced an earlier entry for the same restaurant, platform, date, headline and item.` : ""), "ok");
+    setStatus(`Saved ${saved} price(s) for ${niceDate(day)}.` + (replaced ? ` ${replaced} replaced an earlier entry for the same restaurant, platform, date, category and item.` : ""), "ok");
   } catch (e) { if (mySession === session) { setStatus(e.message, "err"); if (data.length) persist(); } }   // rows are still here: make sure the server has them too (it empties its copy after the first batch)
   if (mySession !== session) return;
   setBusy("");
@@ -1148,7 +1171,8 @@ $("clearBtn").onclick = () => { data = []; showBad = false; render(); persist();
 
 /* ---------- Compare restaurants ---------- */
 const COMPARE = "⚖ compare";   // the id of the Compare tab (not a restaurant)
-const isRestaurantView = () => view !== "add" && view !== COMPARE;
+const LINE = "📈 line";   // the id of the Compare line tab
+const isRestaurantView = () => view !== "add" && view !== COMPARE && view !== LINE;
 let links = {};            // competitor item -> your item, saved on the server
 let linksLoaded = false;
 const cmp = { ref: "", platform: "", headline: "", basis: "original", den: "theirs" };
@@ -1474,7 +1498,9 @@ function renderCompare() {
   if (!plats.includes(cmp.platform)) cmp.platform = plats[0];
   plats.forEach((p) => addOption($("cmpPlat"), p, p)); $("cmpPlat").value = cmp.platform;
   $("cmpDenMine").textContent = `${cmp.ref}'s price`;   // names your restaurant, e.g. "Gennaro's price"
-  $("cmpBasis").value = cmp.basis; $("cmpDen").value = cmp.den;
+  { const seg = $("cmpBasis"); seg.innerHTML = "";
+    [["original", "Original price"], ["sale", "Promo price"]].forEach(([v, t]) => { const b = document.createElement("button"); b.type = "button"; b.textContent = t; b.className = cmp.basis === v ? "active" : ""; b.onclick = () => { cmp.basis = v; renderCompare(); }; seg.appendChild(b); }); }
+  $("cmpDen").value = cmp.den;
 
   // "Compare with": tick the restaurants to include.
   const others = names.filter((n) => n !== cmp.ref), off = skipped(), pick = $("cmpPick");
@@ -1504,7 +1530,7 @@ function renderCompare() {
   }
   const heads = [...new Set(ref.rows.map((r) => r.size))].sort(naturalSort);
   if (cmp.headline !== ALL && !heads.includes(cmp.headline)) cmp.headline = ALL;   // start with everything, not just the first headline
-  heads.forEach((h) => addOption($("cmpHead"), h, h)); addOption($("cmpHead"), ALL, "All headlines"); $("cmpHead").value = cmp.headline;
+  heads.forEach((h) => addOption($("cmpHead"), h, h)); addOption($("cmpHead"), ALL, "All categories"); $("cmpHead").value = cmp.headline;
   const group = cmp.headline === ALL ? ref.rows : ref.rows.filter((r) => r.size === cmp.headline);
   const groupSizes = new Set(group.map((r) => sizeKey(r.size)));
   const refKey = (r) => sizeKey(r.size) + "|" + nameKey(r.item);
@@ -1515,7 +1541,7 @@ function renderCompare() {
   // Every other restaurant's current prices, matched to yours by name + size (or by a link you saved).
   const refNorm = norm(cmp.ref);
   const linkOf = (comp, row) => { const l = linkEntry(comp, row); return l && l.ref === refNorm ? l.item : null; };
-  const refRowOf = (size, target) => String(target).startsWith("@")   // "@<your headline>|<your item>": one of your items, in any headline
+  const refRowOf = (size, target) => String(target).startsWith("@")   // "@<your category>|<your item>": one of your items, in any headline
     ? group.find((r) => norm(r.size) + "|" + norm(r.item) === target.slice(1))
     : String(target).startsWith("=")   // "=pizza": a dish with an empty name code, linked by its plain name
     ? group.find((r) => sizeKey(r.size) === size && norm(r.item) === target.slice(1))
@@ -1637,9 +1663,9 @@ function renderCompare() {
     `+ (red): ${cmp.ref} costs more than them. − (green): ${cmp.ref} costs less. Compared on ${basisText}, as a percent of ${cmp.den === "higher" ? "the higher price" : cmp.den === "mine" ? `${cmp.ref}'s price` : "their price"}. ` +
     (comps.some((c) => c.similar.length) ? "≈ = matched by a similar spelling. " : "") +
     `Prices as of ${niceDate(ref.date)} for ${cmp.ref}` + (stale.length ? `; older for ${stale.join(", ")}.` : ", and the same day for the others.") +
-    ([{ name: cmp.ref, older: ref.older }, ...comps].filter((x) => x.older && x.older.length).map((x) => ` ${x.name}: ${x.older.length} headline(s) are from an earlier entry (${niceDate(x.older.map((o) => o.date).sort(byDate)[0])}${x.older.length > 1 && new Set(x.older.map((o) => o.date)).size > 1 ? " or later" : ""}) because the newest entry does not have them.`).join("")) +
+    ([{ name: cmp.ref, older: ref.older }, ...comps].filter((x) => x.older && x.older.length).map((x) => ` ${x.name}: ${x.older.length} category(s) are from an earlier entry (${niceDate(x.older.map((o) => o.date).sort(byDate)[0])}${x.older.length > 1 && new Set(x.older.map((o) => o.date)).size > 1 ? " or later" : ""}) because the newest entry does not have them.`).join("")) +
     (worded.length ? ` Sizes assumed: ${worded.join(", ")} (a plain "Pizza" counts as ${NORMAL_SIZE}, a small pizza as ${SMALL_SIZE}${Object.entries(SAME_SIZE).map(([a, b]) => `, ${a} cm as ${b}`).join("")}).` : "") +
-    (loose.length ? ` ${new Set(loose.map((x) => x.comp)).size} restaurant(s) have headlines that do not match yours: their items are left out until you link them (see below).` : "") +
+    (loose.length ? ` ${new Set(loose.map((x) => x.comp)).size} restaurant(s) have categories that do not match yours: their items are left out until you link them (see below).` : "") +
     (comps.length > cols.length ? ` No matching items: ${comps.filter((c) => !c.matches.size).map((c) => c.name).join(", ")}.` : "");
 
   // Items with no match: pick the same dish of yours (any headline) once, and it is remembered.
@@ -1667,7 +1693,7 @@ function renderCompare() {
   $("cmpUnmatched").hidden = !unmatched.length;
   $("cmpUnmatchedSum").textContent = `Not matched yet (${unmatched.length}): match them by hand`;
   const ut = $("cmpUnTable"); ut.innerHTML = "";
-  const uh = ut.createTHead().insertRow(); ["Restaurant", "Their headline", "Item", "Price", `Same as which of ${cmp.ref}'s items?`].forEach((h) => { const th = document.createElement("th"); th.textContent = h; uh.appendChild(th); });
+  const uh = ut.createTHead().insertRow(); ["Restaurant", "Their category", "Item", "Price", `Same as which of ${cmp.ref}'s items?`].forEach((h) => { const th = document.createElement("th"); th.textContent = h; uh.appendChild(th); });
   const ub = ut.createTBody();
   unmatched.forEach(({ comp, row }) => {
     const tr = ub.insertRow(); tr.insertCell().textContent = comp; tr.insertCell().textContent = row.size; tr.insertCell().textContent = row.item; tr.insertCell().textContent = money(comparePrice(row));
@@ -1700,9 +1726,9 @@ function renderCompare() {
   cmpState.suggestions = suggestions;
   applyUnFilter();
   $("cmpHeads").hidden = !loose.length && !setByHand.length;
-  $("cmpHeadsSum").textContent = `Headlines that do not match yours (${loose.length})` + (setByHand.length ? ` · set by hand (${setByHand.length})` : "");
+  $("cmpHeadsSum").textContent = `Categories that do not match yours (${loose.length})` + (setByHand.length ? ` · set by hand (${setByHand.length})` : "");
   const ht = $("cmpHeadTable"); ht.innerHTML = "";
-  const hh = ht.createTHead().insertRow(); ["Restaurant", "Their headline", "Items", `Same as which of ${cmp.ref}'s headlines?`].forEach((h) => { const th = document.createElement("th"); th.textContent = h; hh.appendChild(th); });
+  const hh = ht.createTHead().insertRow(); ["Restaurant", "Their category", "Items", `Same as which of ${cmp.ref}'s categories?`].forEach((h) => { const th = document.createElement("th"); th.textContent = h; hh.appendChild(th); });
   const hb = ht.createTBody();
   loose.forEach(({ comp, headline, n }) => {
     const tr = hb.insertRow(); tr.insertCell().textContent = comp; tr.insertCell().textContent = headline; tr.insertCell().textContent = n;
@@ -1800,7 +1826,7 @@ $("cmpAIBtn").onclick = async () => {
   const state = cmpState, labels = [...state.pickList.keys()], byComp = new Map(), view = `${cmp.ref}|${cmp.platform}`;
   state.unmatched.forEach(({ comp, row }) => { if (!byComp.has(comp)) byComp.set(comp, []); byComp.get(comp).push(row); });
   if (!byComp.size) return aiStatus("Nothing is waiting to be matched.", "muted");
-  if (labels.length > 150) return aiStatus(`Your menu has ${labels.length} items here, which is too many for one go. Choose one of your headlines above first (150 items at most).`, "err");
+  if (labels.length > 150) return aiStatus(`Your menu has ${labels.length} items here, which is too many for one go. Choose one of your categories above first (150 items at most).`, "err");
   const total = [...byComp.values()].reduce((n, r) => n + r.length, 0), calls = [...byComp.values()].reduce((n, r) => n + Math.ceil(r.length / AI_CHUNK), 0);
   if (!confirm(`Send ${labels.length} of your item names and ${total} of theirs to Claude to suggest matches (${calls} request${calls > 1 ? "s" : ""})?\n\nIt costs a few cents. Nothing is saved until you check and apply each suggestion.`)) return;
   aiBusy = true; $("cmpAIBtn").disabled = true; aiSuggestions = []; renderAI();
@@ -1869,17 +1895,87 @@ function saveLink(comp, row, target) {
     if (mySession === session) renderCompare();
   });
 }
-["cmpRef", "cmpPlat", "cmpHead", "cmpBasis", "cmpDen"].forEach((id) => {
+["cmpRef", "cmpPlat", "cmpHead", "cmpDen"].forEach((id) => {
   $(id).onchange = () => {
     const v = $(id).value;
     if (id === "cmpRef") { cmp.ref = v; cmp.platform = ""; cmp.headline = ""; aiSuggestions = []; renderAI(); }
     else if (id === "cmpPlat") { cmp.platform = v; cmp.headline = ""; aiSuggestions = []; renderAI(); }
     else if (id === "cmpHead") cmp.headline = v;
-    else if (id === "cmpBasis") cmp.basis = v;
     else cmp.den = v;
     renderCompare();
   };
 });
+
+
+/* ---------- Compare line: one dish, its price over time ---------- */
+const ln = { ref: "", platform: "", cat: "", item: "", basis: "original", others: null };   // others: Set of restaurants switched off
+const timeOf = (d) => { const t = String(d); const v = t.length > 10 ? Date.parse(t.slice(0, 10) + "T" + t.slice(11, 13) + ":00:00") : Date.parse(t + "T23:59:00"); return Number.isFinite(v) ? v : NaN; };
+function linePrice(r) { const sale = numOf(r.sale_price), original = numOf(r.regular_price); return ln.basis === "original" && Number.isFinite(original) ? original : sale; }
+function renderLine() {
+  if (view !== LINE) return;
+  clearKeyCaches();
+  const fill = (sel, opts, cur) => { sel.innerHTML = ""; opts.forEach(([v, t]) => addOption(sel, v, t)); sel.value = opts.some(([v]) => v === cur) ? cur : (opts[0] ? opts[0][0] : ""); return sel.value; };
+  const empty = (msg) => { $("lnEmpty").hidden = false; $("lnEmpty").textContent = msg; $("lnChart").innerHTML = ""; $("lnLegend").innerHTML = ""; $("lnOthers").innerHTML = ""; };
+  const names = [...new Set(history.map((r) => r.restaurant))].sort((a, b) => a.localeCompare(b));
+  if (!names.length) { fill($("lnRef"), [], ""); return empty("No saved prices yet."); }
+  ln.ref = fill($("lnRef"), names.map((n) => [n, n]), ln.ref || names.find((n) => key(n) === "gennaro") || names[0]);
+  const plats = PLATFORMS.filter((p) => history.some((r) => r.restaurant === ln.ref && (r.platform || "") === p));
+  if (!plats.length) { fill($("lnPlat"), [], ""); return empty(`No saved prices for ${ln.ref} on Glovo or Wolt yet.`); }
+  ln.platform = fill($("lnPlat"), plats.map((p) => [p, p]), ln.platform);
+  const mine = history.filter((r) => r.restaurant === ln.ref && (r.platform || "") === ln.platform);
+  const cats = [...new Set(mine.map((r) => r.size))].sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+  ln.cat = fill($("lnCat"), cats.map((c) => [c, c]), ln.cat);
+  const items = [...new Set(mine.filter((r) => r.size === ln.cat).map((r) => r.item))].sort((a, b) => a.localeCompare(b));
+  ln.item = fill($("lnItem"), items.map((i) => [i, i]), ln.item);
+  const seg = $("lnBasis"); seg.innerHTML = "";
+  [["original", "Original price"], ["sale", "Promo price"]].forEach(([v, t]) => { const b = document.createElement("button"); b.type = "button"; b.textContent = t; b.className = ln.basis === v ? "active" : ""; b.onclick = () => { ln.basis = v; renderLine(); }; seg.appendChild(b); });
+  $("lnEmpty").hidden = true;
+
+  // the lines: your dish, then the same dish at other restaurants (same name and size, by the Compare tab's name matching)
+  const series = []; const pointsOf = (rows) => { const byTime = new Map(); rows.forEach((r) => { const t = timeOf(r.date), p = linePrice(r); if (Number.isFinite(t) && Number.isFinite(p)) byTime.set(t, { t, p, date: r.date }); }); return [...byTime.values()].sort((a, b) => a.t - b.t); };
+  series.push({ name: ln.ref, color: "#b8321f", pts: pointsOf(mine.filter((r) => r.size === ln.cat && r.item === ln.item)) });
+  const nk = nameKey(ln.item), sk = sizeKey(ln.cat), palette = ["#2b6cb0", "#1f7a2e", "#8a5200", "#7b3fa0", "#0f8b8d", "#c05621", "#4a5568"];
+  const others = names.filter((n) => n !== ln.ref && history.some((r) => r.restaurant === n && (r.platform || "") === ln.platform && nameKey(r.item) === nk && sizeKey(r.size) === sk));
+  const off = ln.others || (ln.others = new Set());
+  const box = $("lnOthers"); box.innerHTML = "";
+  if (others.length) { const t = document.createElement("strong"); t.textContent = "Also show:"; box.appendChild(t); }
+  others.forEach((n, i) => {
+    const l = document.createElement("label"), c = document.createElement("input"); c.type = "checkbox"; c.checked = !off.has(n);
+    c.onchange = () => { if (c.checked) off.delete(n); else off.add(n); renderLine(); };
+    l.appendChild(c); l.appendChild(document.createTextNode(n)); box.appendChild(l);
+    if (!off.has(n)) series.push({ name: n, color: palette[i % palette.length], pts: pointsOf(history.filter((r) => r.restaurant === n && (r.platform || "") === ln.platform && nameKey(r.item) === nk && sizeKey(r.size) === sk)) });
+  });
+
+  const all = series.flatMap((s) => s.pts);
+  if (!all.length) return empty("This item has no price in the chosen kind yet.");
+  const W = 800, H = 360, L = 62, R = 36, T = 20, B = 44;
+  let t0 = Math.min(...all.map((p) => p.t)), t1 = Math.max(...all.map((p) => p.t)); if (t0 === t1) { t0 -= 43200000; t1 += 43200000; }
+  let p0 = Math.min(...all.map((p) => p.p)), p1 = Math.max(...all.map((p) => p.p)); const padP = (p1 - p0) * 0.15 || Math.max(1, p1 * 0.1); p0 = Math.max(0, p0 - padP); p1 += padP;
+  const X = (t) => L + ((t - t0) / (t1 - t0)) * (W - L - R), Y = (p) => H - B - ((p - p0) / (p1 - p0)) * (H - T - B);
+  const el = (tag, attrs, text) => { const e = document.createElementNS("http://www.w3.org/2000/svg", tag); Object.entries(attrs).forEach(([k, v]) => e.setAttribute(k, v)); if (text !== undefined) e.textContent = text; return e; };
+  const svg = el("svg", { viewBox: `0 0 ${W} ${H}`, role: "img", "aria-label": `Price of ${ln.item} over time` });
+  for (let i = 0; i <= 4; i++) {   // price grid
+    const p = p0 + ((p1 - p0) * i) / 4, y = Y(p);
+    svg.appendChild(el("line", { x1: L, x2: W - R, y1: y, y2: y, stroke: "#e4d4b4", "stroke-width": 1 }));
+    svg.appendChild(el("text", { x: L - 8, y: y + 4, "text-anchor": "end", "font-size": 12, fill: "#7a6552" }, p.toFixed(2) + "₾"));
+  }
+  const ticks = Math.min(5, new Set(all.map((p) => p.t)).size > 1 ? 5 : 1);
+  for (let i = 0; i < ticks; i++) {   // time axis
+    const t = ticks === 1 ? (t0 + t1) / 2 : t0 + ((t1 - t0) * i) / (ticks - 1), d = new Date(t), x = X(t);
+    svg.appendChild(el("line", { x1: x, x2: x, y1: H - B, y2: H - B + 5, stroke: "#7a6552" }));
+    svg.appendChild(el("text", { x, y: H - B + 20, "text-anchor": "middle", "font-size": 12, fill: "#7a6552" }, `${d.getDate()} ${MONTHS[d.getMonth()].slice(0, 3)} ${d.getFullYear() % 100}`));
+  }
+  svg.appendChild(el("line", { x1: L, x2: L, y1: T, y2: H - B, stroke: "#7a6552" }));
+  svg.appendChild(el("line", { x1: L, x2: W - R, y1: H - B, y2: H - B, stroke: "#7a6552" }));
+  series.forEach((s) => {
+    if (s.pts.length > 1) svg.appendChild(el("polyline", { points: s.pts.map((p) => `${X(p.t).toFixed(1)},${Y(p.p).toFixed(1)}`).join(" "), fill: "none", stroke: s.color, "stroke-width": 3, "stroke-linejoin": "round" }));
+    s.pts.forEach((p) => { const c = el("circle", { cx: X(p.t), cy: Y(p.p), r: 5, fill: s.color, stroke: "#fff", "stroke-width": 1.5 }); c.appendChild(el("title", {}, `${s.name}: ${money(p.p)} · ${niceDate(p.date)}`)); svg.appendChild(c); });
+  });
+  $("lnChart").innerHTML = ""; $("lnChart").appendChild(svg);
+  const lg = $("lnLegend"); lg.innerHTML = "";
+  series.forEach((s) => { const sp = document.createElement("span"), sw = document.createElement("i"); sw.style.background = s.color; sp.appendChild(sw); const last = s.pts[s.pts.length - 1]; sp.appendChild(document.createTextNode(`${s.name}` + (last ? ` · now ${money(last.p)}` : " · no prices")  )); lg.appendChild(sp); });
+}
+["lnRef", "lnPlat", "lnCat", "lnItem"].forEach((id) => { $(id).onchange = () => { const v = $(id).value; if (id === "lnRef") { ln.ref = v; ln.platform = ""; ln.cat = ""; ln.item = ""; ln.others = null; } else if (id === "lnPlat") { ln.platform = v; ln.cat = ""; ln.item = ""; } else if (id === "lnCat") { ln.cat = v; ln.item = ""; } else ln.item = v; renderLine(); }; });
 
 /* ---------- Face ID / fingerprint sign-in (optional; the password always works) ---------- */
 const canPasskey = () => !!(window.PublicKeyCredential && navigator.credentials);

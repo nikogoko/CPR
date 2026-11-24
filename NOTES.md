@@ -137,3 +137,5 @@ index line chart, and yellow cells meaning "price changed since yesterday").
 Scratch scripts from the build session, in the backup zip under `session-tests/` (not in the repo): a Node script running the real functions against an in-memory store, and Playwright
 browser tests against a fake server (login, saving, tabs, compare, Face ID with Chromium's virtual authenticator, dates, name and size matching). They contain hard-coded paths and need
 small edits to run elsewhere. When you change behaviour, rerun the same kinds of checks.
+
+**Compare line tab + wording (Nov 24)**: new tab "📈 Compare line" (`lineView`, `renderLine`): pick restaurant, app, category, item; hand-drawn SVG line of price over time (original or promo), plus lines for other restaurants selling the same dish (found by the Compare tab's name + size matching, not by hand links). The word "headline" is now "category" everywhere the owner sees it (code names unchanged). Compare tab's Prices choice is two pill buttons (Original price / Promo price).
