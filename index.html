@@ -123,6 +123,10 @@
 
   /* Glovo / Wolt switch inside a restaurant */
   .lineChart svg { width: 100%; height: auto; display: block; background: var(--paper); border: 1px solid var(--line); border-radius: 12px; }
+  .lineChart { position: relative; }
+  .lineTip { position: absolute; background: var(--paper); border: 1px solid var(--line); border-radius: 10px; padding: 8px 10px; font-size: .85rem; box-shadow: 0 4px 14px rgba(58,36,24,.18); pointer-events: none; max-width: 260px; }
+  .lineTip strong { display: block; margin-bottom: 4px; }
+  .lineTip i { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 6px; }
   .lineLegend { display: flex; flex-wrap: wrap; gap: 6px 16px; margin-top: 8px; font-size: .9rem; }
   .pick i.swatch { display: inline-block; width: 14px; height: 4px; border-radius: 2px; margin: 0 4px 0 2px; vertical-align: middle; }
   .lineLegend i { display: inline-block; width: 18px; height: 4px; border-radius: 2px; margin-right: 6px; vertical-align: middle; }
@@ -1982,9 +1986,27 @@ function renderLine() {
   svg.appendChild(el("line", { x1: L, x2: W - R, y1: H - B, y2: H - B, stroke: "#7a6552" }));
   series.forEach((s) => {
     if (s.pts.length > 1) svg.appendChild(el("polyline", { points: s.pts.map((p) => `${X(p.t).toFixed(1)},${Y(p.p).toFixed(1)}`).join(" "), fill: "none", stroke: s.color, "stroke-width": 3, "stroke-linejoin": "round" }));
-    s.pts.forEach((p) => { const c = el("circle", { cx: X(p.t), cy: Y(p.p), r: 5, fill: s.color, stroke: "#fff", "stroke-width": 1.5 }); c.appendChild(el("title", {}, `${s.name}: ${money(p.p)} · ${niceDate(p.date)}`)); svg.appendChild(c); });
+    s.pts.forEach((p) => { const c = el("circle", { cx: X(p.t), cy: Y(p.p), r: 5, fill: s.color, stroke: "#fff", "stroke-width": 1.5 }); c.setAttribute("aria-label", `${s.name}: ${money(p.p)} · ${niceDate(p.date)}`); svg.appendChild(c); });
   });
   $("lnChart").innerHTML = ""; $("lnChart").appendChild(svg);
+  // Hover (or touch): a guide line at the closest date and a box with every restaurant's price on that date.
+  const guide = el("line", { y1: T, y2: H - B, stroke: "#7a6552", "stroke-width": 1, "stroke-dasharray": "4 3", visibility: "hidden" }); svg.appendChild(guide);
+  const tip = document.createElement("div"); tip.className = "lineTip"; tip.hidden = true; $("lnChart").appendChild(tip);
+  const times = [...new Set(all.map((p) => p.t))].sort((a, b) => a - b);
+  const show = (ev) => {
+    const r = svg.getBoundingClientRect(), x = ((ev.clientX - r.left) / r.width) * W;
+    let t = times[0]; times.forEach((q) => { if (Math.abs(X(q) - x) < Math.abs(X(t) - x)) t = q; });
+    guide.setAttribute("x1", X(t)); guide.setAttribute("x2", X(t)); guide.setAttribute("visibility", "visible");
+    tip.innerHTML = ""; const h = document.createElement("strong"); h.textContent = niceDate(all.find((p) => p.t === t).date); tip.appendChild(h);
+    series.forEach((s) => {
+      const exact = s.pts.find((p) => p.t === t), before = [...s.pts].reverse().find((p) => p.t < t), row = document.createElement("div"), sw = document.createElement("i"); sw.style.background = s.color; row.appendChild(sw);
+      row.appendChild(document.createTextNode(`${s.name}: ` + (exact ? money(exact.p) : before ? `${money(before.p)} (as of ${niceDate(before.date)})` : "no price yet"))); tip.appendChild(row);
+    });
+    tip.hidden = false; const left = (X(t) / W) * r.width, tw = tip.offsetWidth;
+    tip.style.left = Math.max(0, Math.min(r.width - tw, left + 12 > r.width - tw ? left - tw - 12 : left + 12)) + "px"; tip.style.top = "8px";
+  };
+  svg.addEventListener("pointermove", show); svg.addEventListener("pointerdown", show);
+  svg.addEventListener("pointerleave", () => { tip.hidden = true; guide.setAttribute("visibility", "hidden"); });
   const lg = $("lnLegend"); lg.innerHTML = "";
   series.forEach((s) => { const sp = document.createElement("span"), sw = document.createElement("i"); sw.style.background = s.color; sp.appendChild(sw); const last = s.pts[s.pts.length - 1]; sp.appendChild(document.createTextNode(`${s.name}` + (last ? ` · now ${money(last.p)}` : " · no prices")  )); lg.appendChild(sp); });
 }
