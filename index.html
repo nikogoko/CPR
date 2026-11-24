@@ -124,6 +124,7 @@
   /* Glovo / Wolt switch inside a restaurant */
   .lineChart svg { width: 100%; height: auto; display: block; background: var(--paper); border: 1px solid var(--line); border-radius: 12px; }
   .lineLegend { display: flex; flex-wrap: wrap; gap: 6px 16px; margin-top: 8px; font-size: .9rem; }
+  .pick i.swatch { display: inline-block; width: 14px; height: 4px; border-radius: 2px; margin: 0 4px 0 2px; vertical-align: middle; }
   .lineLegend i { display: inline-block; width: 18px; height: 4px; border-radius: 2px; margin-right: 6px; vertical-align: middle; }
   .pricesBox { display: flex; flex-direction: column; gap: 4px; }
   .pricesBox .lbl { font-size: .75rem; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); font-weight: 600; }
@@ -1953,13 +1954,14 @@ function renderLine() {
   others.forEach((n, i) => {
     const l = document.createElement("label"), c = document.createElement("input"); c.type = "checkbox"; c.checked = !off.has(n);
     c.onchange = () => { if (c.checked) off.delete(n); else off.add(n); renderLine(); };
-    l.appendChild(c); l.appendChild(document.createTextNode(n)); box.appendChild(l);
+    const sw = document.createElement("i"); sw.className = "swatch"; sw.style.background = palette[i % palette.length];
+    l.appendChild(c); l.appendChild(sw); l.appendChild(document.createTextNode(n)); box.appendChild(l);
     if (!off.has(n)) series.push({ name: n, color: palette[i % palette.length], pts: pointsOf(history.filter((r) => r.restaurant === n && (r.platform || "") === ln.platform && nameKey(r.item) === nk && sizeKey(r.size) === sk)) });
   });
 
   const all = series.flatMap((s) => s.pts);
   if (!all.length) return empty(ln.from || ln.to ? "No prices for this item between those dates. Change From / To, or press All time." : "This item has no price in the chosen kind yet.");
-  const W = 800, H = 360, L = 62, R = 36, T = 20, B = 44;
+  const W = Math.max(300, Math.min(900, $("lnChart").clientWidth || 800)), H = W < 500 ? 300 : 360, L = W < 500 ? 52 : 62, R = W < 500 ? 34 : 36, T = 20, B = 44;   // drawn in real pixels so the letters stay readable on a phone
   let t0 = Math.min(...all.map((p) => p.t)), t1 = Math.max(...all.map((p) => p.t)); if (t0 === t1) { t0 -= 43200000; t1 += 43200000; }
   let p0 = Math.min(...all.map((p) => p.p)), p1 = Math.max(...all.map((p) => p.p)); const padP = (p1 - p0) * 0.15 || Math.max(1, p1 * 0.1); p0 = Math.max(0, p0 - padP); p1 += padP;
   const X = (t) => L + ((t - t0) / (t1 - t0)) * (W - L - R), Y = (p) => H - B - ((p - p0) / (p1 - p0)) * (H - T - B);
@@ -1986,6 +1988,8 @@ function renderLine() {
   const lg = $("lnLegend"); lg.innerHTML = "";
   series.forEach((s) => { const sp = document.createElement("span"), sw = document.createElement("i"); sw.style.background = s.color; sp.appendChild(sw); const last = s.pts[s.pts.length - 1]; sp.appendChild(document.createTextNode(`${s.name}` + (last ? ` · now ${money(last.p)}` : " · no prices")  )); lg.appendChild(sp); });
 }
+let lnResizeTimer = 0, lnWidth = 0;
+window.addEventListener("resize", () => { clearTimeout(lnResizeTimer); lnResizeTimer = setTimeout(() => { if (view === LINE && !inSettings && $("lnChart").clientWidth !== lnWidth) { lnWidth = $("lnChart").clientWidth; renderLine(); } }, 150); });   // turning the phone redraws the chart to fit
 $("lnFrom").onchange = () => { ln.from = $("lnFrom").value; renderLine(); };
 $("lnTo").onchange = () => { ln.to = $("lnTo").value; renderLine(); };
 $("lnAllTime").onclick = () => { ln.from = ln.to = ""; renderLine(); };
