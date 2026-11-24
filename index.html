@@ -355,6 +355,11 @@
         <label>Item <select id="lnItem"></select></label>
         <div class="pricesBox"><span class="lbl">Prices</span><div class="seg" id="lnBasis"></div></div>
       </div>
+      <div class="row" style="margin-top:8px">
+        <label>From <input type="date" id="lnFrom"></label>
+        <label>To <input type="date" id="lnTo"></label>
+        <button class="secondary small" id="lnAllTime" type="button">All time</button>
+      </div>
       <div class="pick" id="lnOthers"></div>
       <p id="lnEmpty" class="muted" hidden></p>
       <div id="lnChart" class="lineChart"></div>
@@ -1632,16 +1637,17 @@ function renderCompare() {
   const grid = $("cmpGrid"); grid.innerHTML = "";
   const head = grid.createTHead().insertRow();
   ["Item", cmp.ref, ...cols.map((c) => c.name)].forEach((h) => { const th = document.createElement("th"); th.textContent = h; head.appendChild(th); });
-  const body = grid.createTBody(), sums = cols.map(() => []);
+  const body = grid.createTBody(), sums = cols.map(() => []), priceSums = cols.map(() => []), myAll = [];
   rows.forEach((r) => {
-    const tr = body.insertRow(), mine = comparePrice(r);
+    const tr = body.insertRow(), mine = comparePrice(r); if (Number.isFinite(mine)) myAll.push(mine);
     tr.insertCell().textContent = r.item;
     const mc = tr.insertCell(); mc.className = "num"; const b = document.createElement("strong"); b.textContent = money(mine); mc.appendChild(b);
     cols.forEach((c, i) => {
       const td = tr.insertCell(), m = c.matches.get(refKey(r));
       if (!m) { td.textContent = "–"; td.className = "muted num"; return; }
       td.className = "num";
-      const theirs = comparePrice(m), s = document.createElement("span"); s.textContent = money(theirs); td.appendChild(s);
+      const theirs = comparePrice(m); if (Number.isFinite(theirs)) priceSums[i].push(theirs);
+      const s = document.createElement("span"); s.textContent = money(theirs); td.appendChild(s);
       const d = diffPercent(mine, theirs);
       if (!Number.isNaN(d)) { td.appendChild(diffTag(d)); sums[i].push(d); }
       const clash = c.conflicts.find((x) => x.k === refKey(r));
@@ -1654,6 +1660,9 @@ function renderCompare() {
       }
     });
   });
+  const avgP = body.insertRow(); avgP.className = "avg"; avgP.insertCell().textContent = "Average price";
+  { const c = avgP.insertCell(); c.className = "num"; c.textContent = myAll.length ? money(myAll.reduce((a, x) => a + x, 0) / myAll.length) : "–"; }
+  priceSums.forEach((list) => { const td = avgP.insertCell(); td.className = "num"; if (!list.length) { td.textContent = "–"; return; } td.textContent = money(list.reduce((a, x) => a + x, 0) / list.length); const n = document.createElement("span"); n.className = "muted"; n.textContent = ` (${list.length} of ${rows.length})`; td.appendChild(n); });
   const avg = body.insertRow(); avg.className = "avg"; avg.insertCell().textContent = "Average difference"; avg.insertCell();
   sums.forEach((list) => { const td = avg.insertCell(); td.className = "num"; if (list.length) td.appendChild(diffTag(Math.round(list.reduce((a, x) => a + x, 0) / list.length))); else td.textContent = "–"; });
 
@@ -1908,7 +1917,7 @@ function saveLink(comp, row, target) {
 
 
 /* ---------- Compare line: one dish, its price over time ---------- */
-const ln = { ref: "", platform: "", cat: "", item: "", basis: "original", others: null };   // others: Set of restaurants switched off
+const ln = { ref: "", platform: "", cat: "", item: "", basis: "original", others: null, from: "", to: "" };   // others: Set of restaurants switched off
 const timeOf = (d) => { const t = String(d); const v = t.length > 10 ? Date.parse(t.slice(0, 10) + "T" + t.slice(11, 13) + ":00:00") : Date.parse(t + "T23:59:00"); return Number.isFinite(v) ? v : NaN; };
 function linePrice(r) { const sale = numOf(r.sale_price), original = numOf(r.regular_price); return ln.basis === "original" && Number.isFinite(original) ? original : sale; }
 function renderLine() {
@@ -1932,7 +1941,9 @@ function renderLine() {
   $("lnEmpty").hidden = true;
 
   // the lines: your dish, then the same dish at other restaurants (same name and size, by the Compare tab's name matching)
-  const series = []; const pointsOf = (rows) => { const byTime = new Map(); rows.forEach((r) => { const t = timeOf(r.date), p = linePrice(r); if (Number.isFinite(t) && Number.isFinite(p)) byTime.set(t, { t, p, date: r.date }); }); return [...byTime.values()].sort((a, b) => a.t - b.t); };
+  const lo = ln.from ? Date.parse(ln.from + "T00:00:00") : -Infinity, hi = ln.to ? Date.parse(ln.to + "T23:59:59") : Infinity, inRange = (t) => t >= lo && t <= hi;
+  $("lnFrom").value = ln.from; $("lnTo").value = ln.to;
+  const series = []; const pointsOf = (rows) => { const byTime = new Map(); rows.forEach((r) => { const t = timeOf(r.date), p = linePrice(r); if (Number.isFinite(t) && Number.isFinite(p)) if (inRange(t)) byTime.set(t, { t, p, date: r.date }); }); return [...byTime.values()].sort((a, b) => a.t - b.t); };
   series.push({ name: ln.ref, color: "#b8321f", pts: pointsOf(mine.filter((r) => r.size === ln.cat && r.item === ln.item)) });
   const nk = nameKey(ln.item), sk = sizeKey(ln.cat), palette = ["#2b6cb0", "#1f7a2e", "#8a5200", "#7b3fa0", "#0f8b8d", "#c05621", "#4a5568"];
   const others = names.filter((n) => n !== ln.ref && history.some((r) => r.restaurant === n && (r.platform || "") === ln.platform && nameKey(r.item) === nk && sizeKey(r.size) === sk));
@@ -1947,7 +1958,7 @@ function renderLine() {
   });
 
   const all = series.flatMap((s) => s.pts);
-  if (!all.length) return empty("This item has no price in the chosen kind yet.");
+  if (!all.length) return empty(ln.from || ln.to ? "No prices for this item between those dates. Change From / To, or press All time." : "This item has no price in the chosen kind yet.");
   const W = 800, H = 360, L = 62, R = 36, T = 20, B = 44;
   let t0 = Math.min(...all.map((p) => p.t)), t1 = Math.max(...all.map((p) => p.t)); if (t0 === t1) { t0 -= 43200000; t1 += 43200000; }
   let p0 = Math.min(...all.map((p) => p.p)), p1 = Math.max(...all.map((p) => p.p)); const padP = (p1 - p0) * 0.15 || Math.max(1, p1 * 0.1); p0 = Math.max(0, p0 - padP); p1 += padP;
@@ -1975,6 +1986,9 @@ function renderLine() {
   const lg = $("lnLegend"); lg.innerHTML = "";
   series.forEach((s) => { const sp = document.createElement("span"), sw = document.createElement("i"); sw.style.background = s.color; sp.appendChild(sw); const last = s.pts[s.pts.length - 1]; sp.appendChild(document.createTextNode(`${s.name}` + (last ? ` · now ${money(last.p)}` : " · no prices")  )); lg.appendChild(sp); });
 }
+$("lnFrom").onchange = () => { ln.from = $("lnFrom").value; renderLine(); };
+$("lnTo").onchange = () => { ln.to = $("lnTo").value; renderLine(); };
+$("lnAllTime").onclick = () => { ln.from = ln.to = ""; renderLine(); };
 ["lnRef", "lnPlat", "lnCat", "lnItem"].forEach((id) => { $(id).onchange = () => { const v = $(id).value; if (id === "lnRef") { ln.ref = v; ln.platform = ""; ln.cat = ""; ln.item = ""; ln.others = null; } else if (id === "lnPlat") { ln.platform = v; ln.cat = ""; ln.item = ""; } else if (id === "lnCat") { ln.cat = v; ln.item = ""; } else ln.item = v; renderLine(); }; });
 
 /* ---------- Face ID / fingerprint sign-in (optional; the password always works) ---------- */
